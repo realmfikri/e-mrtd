@@ -6,12 +6,17 @@ import javacard.framework.AID;
 
 import javax.smartcardio.*;
 
+import org.jmrtd.lds.LDSFile;
 import org.jmrtd.lds.icao.COMFile;
 import org.jmrtd.lds.icao.DG1File;
-import org.jmrtd.lds.LDSFile;
 import net.sf.scuba.data.Gender;
 import org.jmrtd.lds.icao.MRZInfo;
 
+import emu.PersonalizationSupport.SODArtifacts;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 
 public class PersoMain {
@@ -21,6 +26,8 @@ public class PersoMain {
   // FID standar
   private static final short EF_COM = (short)0x011E;
   private static final short EF_DG1 = (short)0x0101;
+  private static final short EF_DG15 = (short)0x010F;
+  private static final short EF_SOD = (short)0x011D;
 
   public static void main(String[] args) throws Exception {
     // 1) Boot simulator + install applet
@@ -36,7 +43,7 @@ public class PersoMain {
 
     // 3) Siapkan payload LDS (COM + DG1) dengan JMRTD
     // COM berisi daftar DG yang hadir. Di sini minimalis: hanya DG1.
-    int[] tagList = new int[]{LDSFile.EF_DG1_TAG};
+    int[] tagList = new int[]{LDSFile.EF_DG1_TAG, LDSFile.EF_DG15_TAG};
     COMFile com = new COMFile("1.7", "4.0.0", tagList); // versi umum; cukup untuk uji
     byte[] comBytes = com.getEncoded();
 
@@ -56,6 +63,31 @@ public class PersoMain {
     createEF(ch, EF_DG1, dg1Bytes.length, "CREATE EF.DG1");
     selectEF(ch, EF_DG1, "SELECT EF.DG1 before WRITE");
     writeBinary(ch, dg1Bytes, "WRITE EF.DG1");
+
+    // 6) Buat EF.SOD, EF.DG15 dan tulis
+    SODArtifacts sodArtifacts = PersonalizationSupport.buildSOD(dg1Bytes);
+
+    createEF(ch, EF_DG15, sodArtifacts.dg15Bytes.length, "CREATE EF.DG15");
+    selectEF(ch, EF_DG15, "SELECT EF.DG15 before WRITE");
+    writeBinary(ch, sodArtifacts.dg15Bytes, "WRITE EF.DG15");
+    createEF(ch, EF_SOD, sodArtifacts.sodBytes.length, "CREATE EF.SOD");
+    selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
+    writeBinary(ch, sodArtifacts.sodBytes, "WRITE EF.SOD");
+
+    // 7) Simpan trust store untuk Passive Authentication verifier
+    Path trustDir = Paths.get("target", "trust-store");
+    Files.createDirectories(trustDir);
+    try (var stream = Files.list(trustDir)) {
+      stream.filter(Files::isRegularFile).forEach(path -> {
+        try {
+          Files.delete(path);
+        } catch (Exception ignore) {
+        }
+      });
+    }
+    Files.deleteIfExists(trustDir.resolve("dsc.cer"));
+    Files.write(trustDir.resolve("csca.cer"), sodArtifacts.cscaCert.getEncoded());
+    System.out.println("Trust store updated -> " + trustDir.toAbsolutePath());
 
 //     // 1) Read full EF.DG1
 // selectEF(ch, EF_DG1, "SELECT EF.DG1 (full read)");
@@ -86,7 +118,7 @@ public class PersoMain {
     selectEF(ch, EF_DG1, "SELECT EF.DG1 (verify)");
     readSome(ch, Math.min(16, dg1Bytes.length), "READ EF.DG1 head");
 
-    System.out.println("\n✅ Personalisasi minimal selesai: EF.COM + EF.DG1 sudah ditulis.");
+    System.out.println("\n✅ Personalisasi selesai: EF.COM, EF.DG1, EF.SOD ditulis.");
   }
 
   // ======= util APDU =======
@@ -112,6 +144,7 @@ public class PersoMain {
       off += len;
     }
   }
+
 
   private static void selectEF(CardChannel ch, short fid, String label) throws Exception {
     byte[] sfid = new byte[]{0x02, (byte)((fid >> 8) & 0xFF), (byte)(fid & 0xFF)};

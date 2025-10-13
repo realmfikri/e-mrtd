@@ -143,6 +143,7 @@ public class PassportApplet extends Applet implements ISO7816 {
     private byte[] rnd;
 
     private byte[] ssc;
+    private byte[] smExpectedSSC;
 
     private byte[] documentNumber;
 
@@ -200,6 +201,8 @@ public class PassportApplet extends Applet implements ISO7816 {
                 JCSystem.CLEAR_ON_RESET);
         ssc = JCSystem
                 .makeTransientByteArray((byte) 8, JCSystem.CLEAR_ON_RESET);
+        smExpectedSSC = JCSystem
+                .makeTransientByteArray((byte) 8, JCSystem.CLEAR_ON_RESET);
         volatileState = JCSystem.makeTransientByteArray((byte) 1,
                 JCSystem.CLEAR_ON_RESET);
         lastINS = JCSystem.makeTransientByteArray((short) 1,
@@ -255,9 +258,12 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         if (protectedApdu & hasMutuallyAuthenticated()) {
             try {
+                assertSecureMessagingCounter();
                 le = crypto.unwrapCommandAPDU(ssc, apdu);
+                updateSmExpectedCounter();
             } catch (CardRuntimeException e) {
-                sw1sw2 = e.getReason();
+                updateSmExpectedCounter();
+                sw1sw2 = normalizeSmError(e.getReason());
             }
         } else if (protectedApdu) {
             ISOException.throwIt(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED);
@@ -265,6 +271,7 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         if (sw1sw2 == SW_OK) {
             try {
+                enforceSecureMessaging(ins, protectedApdu);
                 responseLength = processAPDU(apdu, cla, ins, protectedApdu, le);
             } catch (CardRuntimeException e) {
                 sw1sw2 = e.getReason();
@@ -275,6 +282,7 @@ public class PassportApplet extends Applet implements ISO7816 {
             responseLength = crypto.wrapResponseAPDU(ssc, apdu, crypto
                     .getApduBufferOffset(responseLength), responseLength,
                     sw1sw2);
+            updateSmExpectedCounter();
         }
 
         if (responseLength > 0) {
@@ -346,6 +354,57 @@ public class PassportApplet extends Applet implements ISO7816 {
             break;
         }
         return responseLength;
+    }
+
+    private void enforceSecureMessaging(byte ins, boolean protectedApdu) {
+        if (!hasMutuallyAuthenticated()) {
+            return;
+        }
+        if (!protectedApdu && requiresSecureMessaging(ins)) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+    }
+
+    private boolean requiresSecureMessaging(byte ins) {
+        switch (ins) {
+        case INS_SELECT_FILE:
+        case INS_READ_BINARY:
+        case INS_UPDATE_BINARY:
+        case INS_CREATE_FILE:
+        case INS_PUT_DATA:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    private void assertSecureMessagingCounter() {
+        if (smExpectedSSC == null || ssc == null) {
+            return;
+        }
+        if (smExpectedSSC.length == 0 || ssc.length == 0) {
+            return;
+        }
+        if (Util.arrayCompare(ssc, (short) 0, smExpectedSSC, (short) 0,
+                (short) Math.min(ssc.length, smExpectedSSC.length)) != 0) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+    }
+
+    private void updateSmExpectedCounter() {
+        if (smExpectedSSC == null || ssc == null) {
+            return;
+        }
+        short len = (short) Math.min(ssc.length, smExpectedSSC.length);
+        Util.arrayCopyNonAtomic(ssc, (short) 0, smExpectedSSC, (short) 0, len);
+    }
+
+    private void resetSecureMessagingState() {
+        updateSmExpectedCounter();
+    }
+
+    private short normalizeSmError(short reason) {
+        return ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED;
     }
 
     private short processPSO(APDU apdu) {
@@ -859,6 +918,7 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         setNoChallenged();
         volatileState[0] |= MUTUAL_AUTHENTICATED;
+        resetSecureMessagingState();
 
         return (short) (ciphertext_len + MAC_LENGTH);
         

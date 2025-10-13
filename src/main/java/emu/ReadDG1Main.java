@@ -18,12 +18,21 @@ import org.jmrtd.lds.icao.MRZInfo;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+
+import emu.PersonalizationSupport.SODArtifacts;
 
 public class ReadDG1Main {
   private static final byte[] MRTD_AID = new byte[]{(byte)0xA0,0x00,0x00,0x02,0x47,0x10,0x01};
   private static final short EF_COM = (short)0x011E;
   private static final short EF_DG1 = (short)0x0101;
+  private static final short EF_DG15 = (short)0x010F;
+  private static final short EF_SOD = (short)0x011D;
 
   // >>> samakan MRZ ini dengan yang kamu tulis ke EF.DG1 saat "PersoMain"
   private static final String DOC = "123456789";
@@ -31,7 +40,30 @@ public class ReadDG1Main {
   private static final String DOE = "250101";
 
   public static void main(String[] args) throws Exception {
-    boolean seed = Arrays.asList(args).contains("--seed");
+    boolean seed = false;
+    Path trustStorePath = null;
+    String trustStorePassword = null;
+    boolean requirePA = false;
+
+    List<String> argList = Arrays.asList(args);
+    for (int i = 0; i < argList.size(); i++) {
+      String arg = argList.get(i);
+      if ("--seed".equals(arg)) {
+        seed = true;
+      } else if (arg.startsWith("--trust-store=")) {
+        trustStorePath = Paths.get(arg.substring("--trust-store=".length()));
+      } else if ("--trust-store".equals(arg)) {
+        i = advanceWithValue(argList, i, "--trust-store");
+        trustStorePath = Paths.get(argList.get(i));
+      } else if (arg.startsWith("--trust-store-password=")) {
+        trustStorePassword = arg.substring("--trust-store-password=".length());
+      } else if ("--trust-store-password".equals(arg)) {
+        i = advanceWithValue(argList, i, "--trust-store-password");
+        trustStorePassword = argList.get(i);
+      } else if ("--require-pa".equals(arg)) {
+        requirePA = true;
+      }
+    }
 
     // Boot emulator & install applet
     CardSimulator sim = new CardSimulator();
@@ -78,10 +110,38 @@ public class ReadDG1Main {
       System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
       System.out.println("Gender: " + info.getGender()); // jmrtd 0.8.x
     }
+
+    if (trustStorePath == null) {
+      Path defaultTrust = Paths.get("target", "trust-store");
+      if (Files.isDirectory(defaultTrust)) {
+        trustStorePath = defaultTrust;
+      }
+    }
+
+    boolean runPA = trustStorePath != null || requirePA;
+    if (runPA) {
+      char[] passwordChars = trustStorePassword != null ? trustStorePassword.toCharArray() : null;
+      PassiveAuthentication.Result paResult = PassiveAuthentication.verify(svc, trustStorePath, passwordChars);
+      paResult.printReport();
+      if (requirePA && !paResult.isPass()) {
+        throw new RuntimeException("Passive Authentication failed but was required");
+      }
+      if (passwordChars != null) {
+        Arrays.fill(passwordChars, '\0');
+      }
+    }
+  }
+
+  private static int advanceWithValue(List<String> args, int index, String option) {
+    int next = index + 1;
+    if (next >= args.size()) {
+      throw new IllegalArgumentException(option + " requires a value");
+    }
+    return next;
   }
 
   private static void personalize(CardChannel ch) throws Exception {
-    int[] tagList = new int[]{LDSFile.EF_DG1_TAG};
+    int[] tagList = new int[]{LDSFile.EF_DG1_TAG, LDSFile.EF_DG15_TAG};
     COMFile com = new COMFile("1.7", "4.0.0", tagList);
     byte[] comBytes = com.getEncoded();
 
@@ -97,6 +157,29 @@ public class ReadDG1Main {
     createEF(ch, EF_DG1, dg1Bytes.length, "CREATE EF.DG1");
     selectEF(ch, EF_DG1, "SELECT EF.DG1 before WRITE");
     writeBinary(ch, dg1Bytes, "WRITE EF.DG1");
+
+    SODArtifacts sodArtifacts = PersonalizationSupport.buildSOD(dg1Bytes);
+
+    createEF(ch, EF_DG15, sodArtifacts.dg15Bytes.length, "CREATE EF.DG15");
+    selectEF(ch, EF_DG15, "SELECT EF.DG15 before WRITE");
+    writeBinary(ch, sodArtifacts.dg15Bytes, "WRITE EF.DG15");
+
+    createEF(ch, EF_SOD, sodArtifacts.sodBytes.length, "CREATE EF.SOD");
+    selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
+    writeBinary(ch, sodArtifacts.sodBytes, "WRITE EF.SOD");
+
+    Path trustDir = Paths.get("target", "trust-store");
+    Files.createDirectories(trustDir);
+    try (var stream = Files.list(trustDir)) {
+      stream.filter(Files::isRegularFile).forEach(path -> {
+        try {
+          Files.delete(path);
+        } catch (Exception ignore) {
+        }
+      });
+    }
+    Files.deleteIfExists(trustDir.resolve("dsc.cer"));
+    Files.write(trustDir.resolve("csca.cer"), sodArtifacts.cscaCert.getEncoded());
   }
 
   private static boolean putData(CardChannel ch, int p1, int p2, byte[] data, String label) throws Exception {
