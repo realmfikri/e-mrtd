@@ -64,13 +64,12 @@ import javacardx.crypto.Cipher;
             byte[] mac, short mac_offset) {
         DESKey kA = keyStore.getMacKey(KeyStore.KEY_A);
         DESKey kB = keyStore.getMacKey(KeyStore.KEY_B);
-
         updateMac(msg, msg_offset, msg_len);
-        sig.sign(null, (short)0, (short)0, mac, mac_offset);
-        
+        sig.sign(PassportCrypto.PAD_DATA, (short)0, (short)0, mac, mac_offset);
+
         macCiphECB.init(kB, Cipher.MODE_DECRYPT);
         macCiphECB.doFinal(mac, mac_offset, (short)8, mac, mac_offset);
-        
+
         macCiphECB.init(kA, Cipher.MODE_ENCRYPT);
         macCiphECB.doFinal(mac, mac_offset, (short)8, mac, mac_offset);
     }
@@ -78,7 +77,6 @@ import javacardx.crypto.Cipher;
     
     public boolean verifyMacFinal(byte[] msg, short msg_offset, short msg_len,
             byte[] mac, short mac_offset) {
-      
         createMacFinal(msg, msg_offset, msg_len, tempSpace_verifyMac, (short)0);
                
         if(Util.arrayCompare(mac, mac_offset, tempSpace_verifyMac, (short)0, (short)8) == 0) {

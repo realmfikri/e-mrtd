@@ -57,6 +57,26 @@ public class PersoMain {
     selectEF(ch, EF_DG1, "SELECT EF.DG1 before WRITE");
     writeBinary(ch, dg1Bytes, "WRITE EF.DG1");
 
+//     // 1) Read full EF.DG1
+// selectEF(ch, EF_DG1, "SELECT EF.DG1 (full read)");
+// byte[] back = new byte[dg1Bytes.length];
+// int got = 0;
+// while (got < back.length) {
+//   int chunk = Math.min(0xFF, back.length - got);
+//   ResponseAPDU r = ch.transmit(new CommandAPDU(0x00, 0xB0, (got >> 8) & 0xFF, got & 0xFF, chunk));
+//   System.arraycopy(r.getData(), 0, back, got, r.getData().length);
+//   got += r.getData().length;
+// }
+
+// // 2) Bandingkan byte-by-byte
+// System.out.println("DG1 bytes equal? " + java.util.Arrays.equals(dg1Bytes, back));
+
+// // 3) Decode & print MRZ dari apa yang CHIP kasih balik
+// org.jmrtd.lds.icao.DG1File dg1Check = new org.jmrtd.lds.icao.DG1File(new java.io.ByteArrayInputStream(back));
+// org.jmrtd.lds.icao.MRZInfo info = dg1Check.getMRZInfo();
+// System.out.println("MRZ >> " + info.getPrimaryIdentifier() + "," + info.getSecondaryIdentifier()
+//   + " #" + info.getDocumentNumber() + " DOB=" + info.getDateOfBirth() + " DOE=" + info.getDateOfExpiry());
+
 
     // 6) Verifikasi cepat: SELECT + READ sebagian header file
     // (opsional; hanya ngecek SW & panjang)

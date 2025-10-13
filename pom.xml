@@ -30,6 +30,11 @@
       <artifactId>bcprov-jdk18on</artifactId>
       <version>1.78.1</version>
     </dependency>
+    <dependency>
+    <groupId>net.sf.scuba</groupId>
+    <artifactId>scuba-sc-j2se</artifactId>
+    <version>0.0.16</version>
+    </dependency>
   </dependencies>
 
   <build>
