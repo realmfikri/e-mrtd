@@ -26,10 +26,21 @@ public class PersoMain {
   // FID standar
   private static final short EF_COM = (short)0x011E;
   private static final short EF_DG1 = (short)0x0101;
+  private static final short EF_DG2 = (short)0x0102;
   private static final short EF_DG15 = (short)0x010F;
   private static final short EF_SOD = (short)0x011D;
 
   public static void main(String[] args) throws Exception {
+    boolean corruptDG2 = false;
+    boolean largeDG2 = false;
+    for (String arg : args) {
+      if ("--corrupt-dg2".equals(arg)) {
+        corruptDG2 = true;
+      } else if ("--large-dg2".equals(arg)) {
+        largeDG2 = true;
+      }
+    }
+
     // 1) Boot simulator + install applet
     CardSimulator sim = new CardSimulator();
     AID aid = new AID(MRTD_AID, (short)0, (byte)MRTD_AID.length);
@@ -64,8 +75,14 @@ public class PersoMain {
     selectEF(ch, EF_DG1, "SELECT EF.DG1 before WRITE");
     writeBinary(ch, dg1Bytes, "WRITE EF.DG1");
 
-    // 6) Buat EF.SOD, EF.DG15 dan tulis
-    SODArtifacts sodArtifacts = PersonalizationSupport.buildSOD(dg1Bytes);
+    // 6) Buat EF.DG2, EF.SOD, EF.DG15 dan tulis
+    int faceWidth = largeDG2 ? 720 : 480;
+    int faceHeight = largeDG2 ? 960 : 600;
+    SODArtifacts sodArtifacts = PersonalizationSupport.buildArtifacts(dg1Bytes, faceWidth, faceHeight, corruptDG2);
+
+    createEF(ch, EF_DG2, sodArtifacts.dg2Bytes.length, "CREATE EF.DG2");
+    selectEF(ch, EF_DG2, "SELECT EF.DG2 before WRITE");
+    writeBinary(ch, sodArtifacts.dg2Bytes, "WRITE EF.DG2");
 
     createEF(ch, EF_DG15, sodArtifacts.dg15Bytes.length, "CREATE EF.DG15");
     selectEF(ch, EF_DG15, "SELECT EF.DG15 before WRITE");

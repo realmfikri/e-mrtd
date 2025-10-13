@@ -6,16 +6,21 @@ import javacard.framework.AID;
 
 import javax.smartcardio.*;
 
+import net.sf.scuba.data.Gender;
 import net.sf.scuba.smartcards.TerminalCardService;
 import org.jmrtd.BACKey;
 import org.jmrtd.PassportService;
-import net.sf.scuba.data.Gender;
 import org.jmrtd.lds.LDSFile;
 import org.jmrtd.lds.icao.COMFile;
 import org.jmrtd.lds.icao.DG1File;
+import org.jmrtd.lds.icao.DG2File;
 import org.jmrtd.lds.icao.MRZInfo;
+import org.jmrtd.lds.iso19794.FaceImageInfo;
+import org.jmrtd.lds.iso19794.FaceInfo;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -31,6 +36,7 @@ public class ReadDG1Main {
   private static final byte[] MRTD_AID = new byte[]{(byte)0xA0,0x00,0x00,0x02,0x47,0x10,0x01};
   private static final short EF_COM = (short)0x011E;
   private static final short EF_DG1 = (short)0x0101;
+  private static final short EF_DG2 = (short)0x0102;
   private static final short EF_DG15 = (short)0x010F;
   private static final short EF_SOD = (short)0x011D;
 
@@ -41,6 +47,8 @@ public class ReadDG1Main {
 
   public static void main(String[] args) throws Exception {
     boolean seed = false;
+    boolean corruptDG2 = false;
+    boolean largeDG2 = false;
     Path trustStorePath = null;
     String trustStorePassword = null;
     boolean requirePA = false;
@@ -62,6 +70,10 @@ public class ReadDG1Main {
         trustStorePassword = argList.get(i);
       } else if ("--require-pa".equals(arg)) {
         requirePA = true;
+      } else if ("--corrupt-dg2".equals(arg)) {
+        corruptDG2 = true;
+      } else if ("--large-dg2".equals(arg)) {
+        largeDG2 = true;
       }
     }
 
@@ -77,8 +89,8 @@ public class ReadDG1Main {
     // SELECT AID
     apdu(ch, 0x00, 0xA4, 0x04, 0x0C, MRTD_AID, "SELECT AID");
 
-    // --- tulis data minimal (COM + DG1) ke chip ---
-    personalize(ch);
+    // --- tulis data minimal (COM + DG1 + DG2) ke chip ---
+    personalize(ch, corruptDG2, largeDG2);
 
     // --- langkah penting: tanam kunci BAC di applet ---
     if (seed) {
@@ -130,6 +142,8 @@ public class ReadDG1Main {
         Arrays.fill(passwordChars, '\0');
       }
     }
+
+    printDG2Summary(svc, largeDG2);
   }
 
   private static int advanceWithValue(List<String> args, int index, String option) {
@@ -140,7 +154,7 @@ public class ReadDG1Main {
     return next;
   }
 
-  private static void personalize(CardChannel ch) throws Exception {
+  private static void personalize(CardChannel ch, boolean corruptDG2, boolean largeDG2) throws Exception {
     int[] tagList = new int[]{LDSFile.EF_DG1_TAG, LDSFile.EF_DG15_TAG};
     COMFile com = new COMFile("1.7", "4.0.0", tagList);
     byte[] comBytes = com.getEncoded();
@@ -158,15 +172,21 @@ public class ReadDG1Main {
     selectEF(ch, EF_DG1, "SELECT EF.DG1 before WRITE");
     writeBinary(ch, dg1Bytes, "WRITE EF.DG1");
 
-    SODArtifacts sodArtifacts = PersonalizationSupport.buildSOD(dg1Bytes);
+    int faceWidth = largeDG2 ? 720 : 480;
+    int faceHeight = largeDG2 ? 960 : 600;
+    SODArtifacts artifacts = PersonalizationSupport.buildArtifacts(dg1Bytes, faceWidth, faceHeight, corruptDG2);
 
-    createEF(ch, EF_DG15, sodArtifacts.dg15Bytes.length, "CREATE EF.DG15");
+    createEF(ch, EF_DG15, artifacts.dg15Bytes.length, "CREATE EF.DG15");
     selectEF(ch, EF_DG15, "SELECT EF.DG15 before WRITE");
-    writeBinary(ch, sodArtifacts.dg15Bytes, "WRITE EF.DG15");
+    writeBinary(ch, artifacts.dg15Bytes, "WRITE EF.DG15");
 
-    createEF(ch, EF_SOD, sodArtifacts.sodBytes.length, "CREATE EF.SOD");
+    createEF(ch, EF_DG2, artifacts.dg2Bytes.length, "CREATE EF.DG2");
+    selectEF(ch, EF_DG2, "SELECT EF.DG2 before WRITE");
+    writeBinary(ch, artifacts.dg2Bytes, "WRITE EF.DG2");
+
+    createEF(ch, EF_SOD, artifacts.sodBytes.length, "CREATE EF.SOD");
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
-    writeBinary(ch, sodArtifacts.sodBytes, "WRITE EF.SOD");
+    writeBinary(ch, artifacts.sodBytes, "WRITE EF.SOD");
 
     Path trustDir = Paths.get("target", "trust-store");
     Files.createDirectories(trustDir);
@@ -179,7 +199,7 @@ public class ReadDG1Main {
       });
     }
     Files.deleteIfExists(trustDir.resolve("dsc.cer"));
-    Files.write(trustDir.resolve("csca.cer"), sodArtifacts.cscaCert.getEncoded());
+    Files.write(trustDir.resolve("csca.cer"), artifacts.cscaCert.getEncoded());
   }
 
   private static boolean putData(CardChannel ch, int p1, int p2, byte[] data, String label) throws Exception {
@@ -220,6 +240,67 @@ public class ReadDG1Main {
           label + " (ofs=" + off + ", len=" + len + ")");
       off += len;
     }
+  }
+
+  private static void printDG2Summary(PassportService svc, boolean largeScenario) {
+    byte[] dg2Bytes;
+    try (InputStream in = svc.getInputStream(PassportService.EF_DG2)) {
+      if (in == null) {
+        System.out.println("DG2 not present");
+        return;
+      }
+      dg2Bytes = in.readAllBytes();
+    } catch (Exception e) {
+      System.out.println("DG2 read error: " + e.getMessage());
+      return;
+    }
+
+    final int warningThreshold = 120_000;
+    if (dg2Bytes.length > warningThreshold) {
+      System.out.printf("DG2 size %d bytes exceeds safe threshold (%d). Skipping detailed parse.%n",
+          dg2Bytes.length, warningThreshold);
+      return;
+    }
+
+    try (ByteArrayInputStream in = new ByteArrayInputStream(dg2Bytes)) {
+      DG2File dg2 = new DG2File(in);
+      List<FaceInfo> faceInfos = dg2.getFaceInfos();
+      int faceCount = 0;
+      System.out.println("---- DG2 Metadata ----");
+      for (int i = 0; i < faceInfos.size(); i++) {
+        FaceInfo faceInfo = faceInfos.get(i);
+        List<FaceImageInfo> images = faceInfo.getFaceImageInfos();
+        for (int j = 0; j < images.size(); j++) {
+          faceCount++;
+          FaceImageInfo img = images.get(j);
+          System.out.printf("Face %d.%d: %dx%d px, %s, %d bytes, quality=%d, type=%s%n",
+              i + 1, j + 1,
+              img.getWidth(), img.getHeight(),
+              img.getMimeType(), img.getImageLength(),
+              img.getQuality(), describeImageType(img.getImageDataType()));
+        }
+      }
+      System.out.printf("Total faces: %d%n", faceCount);
+      if (faceCount == 0) {
+        System.out.println("DG2 contains no face images.");
+      }
+      if (largeScenario) {
+        System.out.println("(DG2 generated in large-image scenario)");
+      }
+      System.out.println("----------------------");
+    } catch (IOException | RuntimeException e) {
+      System.out.println("DG2 parse error: " + e.getMessage());
+    }
+  }
+
+  private static String describeImageType(int imageDataType) {
+    if (imageDataType == FaceImageInfo.IMAGE_DATA_TYPE_JPEG) {
+      return "JPEG";
+    }
+    if (imageDataType == FaceImageInfo.IMAGE_DATA_TYPE_JPEG2000) {
+      return "JPEG2000";
+    }
+    return "type=" + imageDataType;
   }
 
   private static byte[] buildMrzSeed(String doc, String dob, String doe) {
