@@ -1,0 +1,25 @@
+# Maven
+target/
+**/target/
+*.class
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# OS / misc
+.DS_Store
+Thumbs.db
+
+# Download artifacts (biar repo ringan)
+libs/**/*.zip
+libs/**/*.cap
+libs/**/*.ijc
+
+# Kalau mau keep folder libs kosong tapi tetap ter-track:
+# (kita bikin file README.md di bawah)
