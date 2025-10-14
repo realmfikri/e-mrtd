@@ -932,10 +932,6 @@ public class PassportApplet extends Applet implements ISO7816 {
      *            where the first 2 data bytes encode the file to select.
      */
     private void processSelectFile(APDU apdu) {
-        if (isLocked() & !hasMutuallyAuthenticated()) {
-            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
-        }
-
         byte[] buffer = apdu.getBuffer();
         short lc = (short) (buffer[OFFSET_LC] & 0x00FF);
 
@@ -951,6 +947,10 @@ public class PassportApplet extends Applet implements ISO7816 {
         }
 
         short fid = Util.getShort(buffer, OFFSET_CDATA);
+
+        if (isLocked() && !hasMutuallyAuthenticated() && fid != FileSystem.EF_CVCA_FID) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
 
         if (fileSystem.getFile(fid) != null) {
             selectedFile = fid;
@@ -972,7 +972,8 @@ public class PassportApplet extends Applet implements ISO7816 {
      * @return length of the response APDU
      */
     private short processReadBinary(APDU apdu, short le, boolean protectedApdu) {
-        if (!hasMutuallyAuthenticated()) {
+        boolean cardAccessRead = (selectedFile == FileSystem.EF_CVCA_FID);
+        if (!hasMutuallyAuthenticated() && !cardAccessRead) {
             ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
         }
 

@@ -6,6 +6,7 @@ import javacard.framework.AID;
 
 import javax.smartcardio.*;
 
+import org.jmrtd.PassportService;
 import org.jmrtd.lds.LDSFile;
 import org.jmrtd.lds.icao.COMFile;
 import org.jmrtd.lds.icao.DG1File;
@@ -27,8 +28,10 @@ public class PersoMain {
   private static final short EF_COM = (short)0x011E;
   private static final short EF_DG1 = (short)0x0101;
   private static final short EF_DG2 = (short)0x0102;
+  private static final short EF_DG14 = PassportService.EF_DG14;
   private static final short EF_DG15 = (short)0x010F;
   private static final short EF_SOD = (short)0x011D;
+  private static final short EF_CARD_ACCESS = PassportService.EF_CARD_ACCESS;
 
   public static void main(String[] args) throws Exception {
     boolean corruptDG2 = false;
@@ -54,7 +57,7 @@ public class PersoMain {
 
     // 3) Siapkan payload LDS (COM + DG1) dengan JMRTD
     // COM berisi daftar DG yang hadir. Di sini minimalis: hanya DG1.
-    int[] tagList = new int[]{LDSFile.EF_DG1_TAG, LDSFile.EF_DG15_TAG};
+    int[] tagList = new int[]{LDSFile.EF_DG1_TAG, LDSFile.EF_DG2_TAG, LDSFile.EF_DG14_TAG, LDSFile.EF_DG15_TAG};
     COMFile com = new COMFile("1.7", "4.0.0", tagList); // versi umum; cukup untuk uji
     byte[] comBytes = com.getEncoded();
 
@@ -80,9 +83,21 @@ public class PersoMain {
     int faceHeight = largeDG2 ? 960 : 600;
     SODArtifacts sodArtifacts = PersonalizationSupport.buildArtifacts(dg1Bytes, faceWidth, faceHeight, corruptDG2);
 
+    if (sodArtifacts.cardAccessBytes != null && sodArtifacts.cardAccessBytes.length > 0) {
+      createEF(ch, EF_CARD_ACCESS, sodArtifacts.cardAccessBytes.length, "CREATE EF.CardAccess");
+      selectEF(ch, EF_CARD_ACCESS, "SELECT EF.CardAccess before WRITE");
+      writeBinary(ch, sodArtifacts.cardAccessBytes, "WRITE EF.CardAccess");
+    }
+
     createEF(ch, EF_DG2, sodArtifacts.dg2Bytes.length, "CREATE EF.DG2");
     selectEF(ch, EF_DG2, "SELECT EF.DG2 before WRITE");
     writeBinary(ch, sodArtifacts.dg2Bytes, "WRITE EF.DG2");
+
+    if (sodArtifacts.dg14Bytes != null && sodArtifacts.dg14Bytes.length > 0) {
+      createEF(ch, EF_DG14, sodArtifacts.dg14Bytes.length, "CREATE EF.DG14");
+      selectEF(ch, EF_DG14, "SELECT EF.DG14 before WRITE");
+      writeBinary(ch, sodArtifacts.dg14Bytes, "WRITE EF.DG14");
+    }
 
     createEF(ch, EF_DG15, sodArtifacts.dg15Bytes.length, "CREATE EF.DG15");
     selectEF(ch, EF_DG15, "SELECT EF.DG15 before WRITE");

@@ -75,13 +75,25 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --large-dg
 ```
 - Generates an oversized DG2 to test system safeguards against excessive biometrics.
 
+Add the repeatable flag `--ta-cvc <path/to/cvc>` to load terminal authentication certificates for reporting. The host will parse and summarise the supplied CVCs without attempting to sign challenges.
+
+When running inside a headless shell (e.g. CI), prepend `JAVA_TOOL_OPTIONS=-Djava.awt.headless=true` so the synthetic biometric generator can render without an X server.
+
+### Generate Demo TA Certificates
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoCvcMain
+```
+- Produces `target/demo-terminal.cvc` and the matching private key `target/demo-terminal.key` (PKCS#8 PEM).
+- Default issuer/holder uses the `UT` test country code; supply `--country <alpha2>` if you need something else.
+- Combine the generated certificate with the reader using `--ta-cvc target/demo-terminal.cvc`.
+
 Each run logs:
 - Personalization steps and LDS writing.
 - BAC establishment and secure messaging status.
 - DG1 (MRZ) parsing output.
 - DG2 metadata (image size, MIME type, quality metrics).
 - Passive authentication results, including hash validation, signature verification, and trust chain status.
-- Session summary (BAC/PACE/CA placeholders).
+- Session summary covering PACE attempts, BAC fallback decisions, chip authentication status, and terminal authentication insights.
 
 ## 📁 Key Directories
 ```bash
@@ -100,6 +112,12 @@ Use these paths for navigation when inspecting or modifying code.
 ## 🛡️ Security Features
 Implemented hardening features include:
 - **Basic Access Control (BAC)** for initial session establishment.
+- **PACE-first Negotiation** using EF.CardAccess data, falling back to BAC if PACE fails while keeping the stronger secure-messaging wrapper when it succeeds.
+- **EF.CardAccess/DG14 Provisioning** during personalization so host tooling can exercise PACE/EAC awareness immediately.
+- **Chip Authentication Awareness** with DG14 parsing and secure-messaging upgrade when the card advertises CA support.
+- **Terminal Authentication Reporting** – DG14 TA metadata is surfaced and user-supplied CVCs are parsed for inspection (host-side only, no signing yet).
+- *Note*: the reference applet does not yet implement PACE or chip-auth cryptography, so runs will log a graceful failure and revert to BAC-protected messaging.
+- **Demo TA Certificate Generator** to mint synthetic CVCs for immediate TA inspection testing.
 - **Secure Messaging (AES + MAC)** to protect APDU exchanges.
 - **Anti-Replay Protection** through SSC monotonicity checks.
 - **LDS Personalization** for EF.COM, EF.DG1, EF.DG2, EF.DG15, EF.SOD with synthetic face image generation.
@@ -109,9 +127,10 @@ Implemented hardening features include:
 
 ## 🧭 Roadmap
 Upcoming enhancements (not yet implemented):
-- **PACE-first workflows** with BAC fallback.
-- **Chip Authentication (CA)** support.
-- **Terminal Authentication (TA)** parsing + optional execution.
+- **Chip-side PACE & Chip Authentication** so the emulator can complete the stronger sessions it now advertises.
+- **Terminal Authentication signing** flows to exercise EAC TA challenge/response.
+- **Active Authentication** handshake support and negative-case scenarios.
+- **Extended PACE options** (PIN/PUK/CAN inputs) and richer error-injection scenarios.
 
 ## 🤝 Contributing
 1. Fork the repository.

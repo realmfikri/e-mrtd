@@ -11,8 +11,15 @@ import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.OperatorCreationException;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.jmrtd.lds.CardAccessFile;
+import org.jmrtd.lds.ChipAuthenticationInfo;
+import org.jmrtd.lds.ChipAuthenticationPublicKeyInfo;
+import org.jmrtd.lds.PACEInfo;
+import org.jmrtd.lds.SecurityInfo;
 import org.jmrtd.lds.SODFile;
+import org.jmrtd.lds.TerminalAuthenticationInfo;
 import org.jmrtd.lds.icao.DG15File;
+import org.jmrtd.lds.icao.DG14File;
 import org.jmrtd.lds.icao.DG2File;
 import org.jmrtd.lds.iso19794.FaceImageInfo;
 import org.jmrtd.lds.iso19794.FaceInfo;
@@ -35,12 +42,15 @@ import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.Security;
 import java.security.cert.X509Certificate;
+import java.security.spec.ECGenParameterSpec;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.math.BigInteger;
 
 final class PersonalizationSupport {
 
@@ -66,6 +76,9 @@ final class PersonalizationSupport {
 
     KeyPair cscaPair = kpg.generateKeyPair();
     KeyPair docSignerPair = kpg.generateKeyPair();
+    KeyPairGenerator ecGenerator = KeyPairGenerator.getInstance("EC");
+    ecGenerator.initialize(new ECGenParameterSpec("secp256r1"));
+    KeyPair chipAuthKeyPair = ecGenerator.generateKeyPair();
 
     Date notBefore = new Date(System.currentTimeMillis() - 24L * 60 * 60 * 1000);
     Date notAfter = new Date(System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000);
@@ -119,6 +132,18 @@ final class PersonalizationSupport {
     DG15File dg15File = new DG15File(docSignerPair.getPublic());
     byte[] dg15Bytes = dg15File.getEncoded();
 
+    PACEInfo paceInfo = new PACEInfo(SecurityInfo.ID_PACE_ECDH_GM_AES_CBC_CMAC_128, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1);
+    CardAccessFile cardAccessFile = new CardAccessFile(Collections.singletonList(paceInfo));
+    byte[] cardAccessBytes = cardAccessFile.getEncoded();
+
+    List<SecurityInfo> dg14Infos = new ArrayList<>();
+    BigInteger chipKeyId = BigInteger.ONE;
+    dg14Infos.add(new ChipAuthenticationPublicKeyInfo(chipAuthKeyPair.getPublic(), chipKeyId));
+    dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_128, 2, chipKeyId));
+    dg14Infos.add(new TerminalAuthenticationInfo((short) 0x010C, (byte) 0x0C));
+    DG14File dg14File = new DG14File(dg14Infos);
+    byte[] dg14Bytes = dg14File.getEncoded();
+
     if (corruptDG2) {
       dg2Bytes = corrupt(dg2Bytes);
     }
@@ -127,12 +152,13 @@ final class PersonalizationSupport {
     MessageDigest md = MessageDigest.getInstance("SHA-256");
     hashes.put(Integer.valueOf(1), md.digest(dg1Bytes));
     hashes.put(Integer.valueOf(2), md.digest(dg2Bytes));
+    hashes.put(Integer.valueOf(14), md.digest(dg14Bytes));
     hashes.put(Integer.valueOf(15), md.digest(dg15Bytes));
 
     SODFile sodFile = new SODFile("SHA-256", SIGNATURE_ALGORITHM, hashes, docSignerPair.getPrivate(), docSignerCert);
     byte[] sodBytes = sodFile.getEncoded();
 
-    return new SODArtifacts(sodBytes, dg2Bytes, dg15Bytes, cscaCert, docSignerCert);
+    return new SODArtifacts(sodBytes, dg2Bytes, dg15Bytes, dg14Bytes, cardAccessBytes, chipAuthKeyPair, cscaCert, docSignerCert);
   }
 
   private static X509Certificate createCertificate(String subject,
@@ -234,17 +260,26 @@ final class PersonalizationSupport {
     final byte[] sodBytes;
     final byte[] dg2Bytes;
     final byte[] dg15Bytes;
+    final byte[] dg14Bytes;
+    final byte[] cardAccessBytes;
+    final KeyPair chipAuthKeyPair;
     final X509Certificate cscaCert;
     final X509Certificate docSignerCert;
 
     SODArtifacts(byte[] sodBytes,
                  byte[] dg2Bytes,
                  byte[] dg15Bytes,
+                 byte[] dg14Bytes,
+                 byte[] cardAccessBytes,
+                 KeyPair chipAuthKeyPair,
                  X509Certificate cscaCert,
                  X509Certificate docSignerCert) {
       this.sodBytes = sodBytes;
       this.dg2Bytes = dg2Bytes;
       this.dg15Bytes = dg15Bytes;
+      this.dg14Bytes = dg14Bytes;
+      this.cardAccessBytes = cardAccessBytes;
+      this.chipAuthKeyPair = chipAuthKeyPair;
       this.cscaCert = cscaCert;
       this.docSignerCert = docSignerCert;
     }
