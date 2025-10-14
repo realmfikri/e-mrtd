@@ -7,6 +7,7 @@ import javacard.framework.AID;
 import javax.smartcardio.*;
 
 import net.sf.scuba.data.Gender;
+import net.sf.scuba.smartcards.CardService;
 import net.sf.scuba.smartcards.TerminalCardService;
 import org.ejbca.cvc.AccessRightEnum;
 import org.ejbca.cvc.AuthorizationField;
@@ -147,8 +148,10 @@ public class ReadDG1Main {
     }
     List<PACEInfo> paceInfos = parsePaceInfos(rawCardAccess);
 
+    CardService baseService = new TerminalCardService(term);
+    CardService loggingService = new LoggingCardService(baseService);
     PassportService svc = new PassportService(
-        new TerminalCardService(term),
+        loggingService,
         PassportService.DEFAULT_MAX_BLOCKSIZE,
         PassportService.DEFAULT_MAX_BLOCKSIZE,
         false, false);
@@ -368,9 +371,10 @@ public class ReadDG1Main {
     outcome.selectedInfo = selectPreferredPACEInfo(paceInfos);
     try {
       AlgorithmParameterSpec parameterSpec = buildPaceParameterSpec(outcome.selectedInfo);
+      String protocolOid = outcome.selectedInfo.getObjectIdentifier();
       PACEResult result = svc.doPACE(
           PACEKeySpec.createMRZKey(bacKey),
-          outcome.selectedInfo.getProtocolOIDString(),
+          protocolOid,
           parameterSpec,
           outcome.selectedInfo.getParameterId());
       outcome.result = result;
@@ -385,11 +389,16 @@ public class ReadDG1Main {
     System.out.printf("PACE entries advertised: %d%n", outcome.availableOptions);
     if (outcome.selectedInfo != null) {
       BigInteger parameterId = outcome.selectedInfo.getParameterId();
+      String displayOid = outcome.selectedInfo.getProtocolOIDString();
+      String dottedOid = outcome.selectedInfo.getObjectIdentifier();
       System.out.printf("Selected PACE OID=%s version=%d paramId=%s keyLength=%d%n",
-          outcome.selectedInfo.getProtocolOIDString(),
+          displayOid != null ? displayOid : dottedOid,
           outcome.selectedInfo.getVersion(),
           parameterId != null ? parameterId.toString(16) : "default",
           resolvePaceKeyLength(outcome.selectedInfo));
+      if (displayOid != null && dottedOid != null && !displayOid.equals(dottedOid)) {
+        System.out.printf("  (OID dotted=%s)%n", dottedOid);
+      }
     }
     if (outcome.result != null) {
       System.out.printf("PACE mapping=%s agreement=%s cipher=%s digest=%s keyLength=%d%n",
@@ -471,11 +480,16 @@ public class ReadDG1Main {
     System.out.printf("Chip Authentication entries advertised: %d%n", chipInfos.size());
     for (ChipAuthenticationInfo info : chipInfos) {
       BigInteger keyId = info.getKeyId();
+      String caDisplay = info.getProtocolOIDString();
+      String caDotted = info.getObjectIdentifier();
       System.out.printf("  CA OID=%s version=%d keyId=%s keyLength=%d%n",
-          info.getProtocolOIDString(),
+          caDisplay != null ? caDisplay : caDotted,
           info.getVersion(),
           keyId != null ? keyId.toString(16) : "n/a",
           resolveChipKeyLength(info));
+      if (caDisplay != null && caDotted != null && !caDisplay.equals(caDotted)) {
+        System.out.printf("    (OID dotted=%s)%n", caDotted);
+      }
     }
 
     Map<BigInteger, ChipAuthenticationPublicKeyInfo> publicKeysById = new HashMap<>();
@@ -511,8 +525,9 @@ public class ReadDG1Main {
 
     outcome.publicKeyInfo = publicKeyInfo;
     try {
-      String agreementAlg = ChipAuthenticationInfo.toKeyAgreementAlgorithm(outcome.selectedInfo.getProtocolOIDString());
-      String cipherAlg = ChipAuthenticationInfo.toCipherAlgorithm(outcome.selectedInfo.getProtocolOIDString());
+      String caOid = outcome.selectedInfo.getObjectIdentifier();
+      String agreementAlg = ChipAuthenticationInfo.toKeyAgreementAlgorithm(caOid);
+      String cipherAlg = ChipAuthenticationInfo.toCipherAlgorithm(caOid);
       EACCAResult result = svc.doEACCA(keyId, agreementAlg, cipherAlg, publicKeyInfo.getSubjectPublicKey());
       outcome.result = result;
       outcome.established = result != null && result.getWrapper() != null;
