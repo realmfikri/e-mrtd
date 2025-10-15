@@ -246,6 +246,17 @@ public class ReadDG1Main {
       }
     }
 
+    int lifecycleSw = putData(ch, 0xDE, 0xAF, new byte[0], "SET LIFECYCLE → PERSONALIZED");
+    if (lifecycleSw != 0x9000) {
+      throw new RuntimeException(String.format(
+          "Gagal mengatur state PERSONALIZED (SW=%04X).", lifecycleSw));
+    }
+    lifecycleSw = putData(ch, 0xDE, 0xAD, new byte[0], "SET LIFECYCLE → LOCKED");
+    if (lifecycleSw != 0x9000) {
+      throw new RuntimeException(String.format(
+          "Gagal mengunci chip (SW=%04X).", lifecycleSw));
+    }
+
     // --- sekarang baca via PassportService + BAC ---
     byte[] rawCardAccess = readEfPlain(ch, EF_CARD_ACCESS);
     if ((rawCardAccess == null || rawCardAccess.length == 0) && personalizationArtifacts != null) {

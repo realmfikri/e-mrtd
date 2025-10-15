@@ -109,7 +109,13 @@ public class PassportApplet extends Applet implements ISO7816 {
 
     static final byte HAS_EXPONENT = 2;
 
-    static final byte LOCKED = 4;
+    private static final byte LIFECYCLE_STATE_MASK = (byte) 0xC0;
+
+    private static final byte LIFECYCLE_PREPERSONALIZED = 0x00;
+
+    private static final byte LIFECYCLE_PERSONALIZED = 0x40;
+
+    private static final byte LIFECYCLE_LOCKED = (byte) 0x80;
 
     static final byte HAS_MODULUS = 8;
 
@@ -244,6 +250,9 @@ public class PassportApplet extends Applet implements ISO7816 {
     public PassportApplet(byte mode) {
 
         fileSystem = new FileSystem();
+
+        persistentState = 0;
+        setLifecycleState(LIFECYCLE_PREPERSONALIZED);
 
         randomData = RandomData.getInstance(RandomData.ALG_PSEUDO_RANDOM);
 
@@ -944,10 +953,6 @@ public class PassportApplet extends Applet implements ISO7816 {
     }
 
     private void processPutData(APDU apdu) {
-        if (isLocked()) {
-            ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
-        }
-
         byte[] buffer = apdu.getBuffer();
         short buffer_p = (short) (OFFSET_CDATA & 0xff);
         short lc = (short) (buffer[OFFSET_LC] & 0xff);
@@ -959,9 +964,14 @@ public class PassportApplet extends Applet implements ISO7816 {
             ISOException.throwIt(SW_INTERNAL_ERROR);
         }
 
-        if (p1 == 0xde && p2 == 0xad) {
-            persistentState |= LOCKED;
-        } else if (p1 == 0 && p2 == PRIVMODULUS_TAG) {
+        if (p1 == 0xde) {
+            handleLifecycleCommand(p2, lc);
+            return;
+        }
+
+        assertPrePersonalized();
+
+        if (p1 == 0 && p2 == PRIVMODULUS_TAG) {
             buffer_p = BERTLVScanner.readTag(buffer, buffer_p); // tag ==
             // PRIVMODULUS_TAG
             buffer_p = BERTLVScanner.readLength(buffer, buffer_p); // length ==
@@ -1747,9 +1757,10 @@ public class PassportApplet extends Applet implements ISO7816 {
      *            p2.
      */
     private void processUpdateBinary(APDU apdu) {
-        if (!hasFileSelected() || isLocked()) {
+        if (!hasFileSelected()) {
             ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
         }
+        assertPrePersonalized();
 
         byte[] buffer = apdu.getBuffer();
         byte p1 = buffer[OFFSET_P1];
@@ -1777,9 +1788,7 @@ public class PassportApplet extends Applet implements ISO7816 {
      *            containing 6 bytes: 0x64 || (1 byte) || size (2) || fid (2)
      */
     private void processCreateFile(APDU apdu) {
-        if (isLocked()) {
-            ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
-        }
+        assertPrePersonalized();
 
         byte[] buffer = apdu.getBuffer();
         short lc = (short) (buffer[OFFSET_LC] & 0xff);
@@ -1843,10 +1852,6 @@ public class PassportApplet extends Applet implements ISO7816 {
         return (volatileState[0] & FILE_SELECTED) == FILE_SELECTED;
     }
 
-    public static boolean isLocked() {
-        return (persistentState & LOCKED) == LOCKED;
-    }
-
     public static boolean isChallenged() {
         return (volatileState[0] & CHALLENGED) == CHALLENGED;
     }
@@ -1870,6 +1875,87 @@ public class PassportApplet extends Applet implements ISO7816 {
 
     private boolean hasSecureMessagingSession() {
         return hasMutuallyAuthenticated() || hasPaceEstablished();
+    }
+
+    private static byte getLifecycleState() {
+        return (byte) (persistentState & LIFECYCLE_STATE_MASK);
+    }
+
+    private static void setLifecycleState(byte newState) {
+        persistentState = (byte) ((persistentState & ~LIFECYCLE_STATE_MASK) | newState);
+    }
+
+    private static void transitionLifecycle(byte targetState) {
+        byte current = getLifecycleState();
+        if (current == targetState) {
+            System.out.println("Lifecycle already in state " + describeLifecycleState(targetState));
+            return;
+        }
+        switch (targetState) {
+        case LIFECYCLE_PERSONALIZED:
+            if (current != LIFECYCLE_PREPERSONALIZED) {
+                ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+            }
+            setLifecycleState(targetState);
+            System.out.println("Lifecycle transitioned to PERSONALIZED state.");
+            break;
+        case LIFECYCLE_LOCKED:
+            if (current != LIFECYCLE_PERSONALIZED) {
+                ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+            }
+            setLifecycleState(targetState);
+            System.out.println("Lifecycle transitioned to LOCKED state.");
+            break;
+        default:
+            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+        }
+    }
+
+    private static String describeLifecycleState(byte state) {
+        switch (state) {
+        case LIFECYCLE_PREPERSONALIZED:
+            return "PRE-PERSONALIZED";
+        case LIFECYCLE_PERSONALIZED:
+            return "PERSONALIZED";
+        case LIFECYCLE_LOCKED:
+            return "LOCKED";
+        default:
+            return "UNKNOWN";
+        }
+    }
+
+    private static boolean isPrePersonalized() {
+        return getLifecycleState() == LIFECYCLE_PREPERSONALIZED;
+    }
+
+    public static boolean isLocked() {
+        return getLifecycleState() == LIFECYCLE_LOCKED;
+    }
+
+    private void assertPrePersonalized() {
+        if (isPrePersonalized()) {
+            return;
+        }
+        if (isLocked()) {
+            ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+        }
+        ISOException.throwIt(ISO7816.SW_COMMAND_NOT_ALLOWED);
+    }
+
+    private void handleLifecycleCommand(short p2, short lc) {
+        if (lc != 0) {
+            ISOException.throwIt(SW_WRONG_LENGTH);
+        }
+        switch (p2) {
+        case (short) 0xAF:
+            transitionLifecycle(LIFECYCLE_PERSONALIZED);
+            break;
+        case (short) 0xAD:
+            transitionLifecycle(LIFECYCLE_LOCKED);
+            break;
+        default:
+            ISOException.throwIt(SW_INCORRECT_P1P2);
+        }
     }
 
     private static String toAsciiString(byte[] data, short offset, short length) {
