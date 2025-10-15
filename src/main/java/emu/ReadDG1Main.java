@@ -75,9 +75,10 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Base64;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import emu.PersonalizationSupport.SODArtifacts;
 
@@ -116,6 +117,7 @@ public class ReadDG1Main {
     boolean requireAA = false;
     List<Path> taCvcPaths = new ArrayList<>();
     Path taKeyPath = null;
+    Path jsonOutPath = null;
     String doc = DEFAULT_DOC;
     String dob = DEFAULT_DOB;
     String doe = DEFAULT_DOE;
@@ -132,17 +134,29 @@ public class ReadDG1Main {
         attemptPace = true;
       } else if (arg.startsWith("--trust-store=")) {
         trustStorePath = Paths.get(arg.substring("--trust-store=".length()));
+      } else if (arg.startsWith("--trust=")) {
+        trustStorePath = Paths.get(arg.substring("--trust=".length()));
       } else if ("--trust-store".equals(arg)) {
         i = advanceWithValue(argList, i, "--trust-store");
         trustStorePath = Paths.get(argList.get(i));
+      } else if ("--trust".equals(arg)) {
+        i = advanceWithValue(argList, i, "--trust");
+        trustStorePath = Paths.get(argList.get(i));
       } else if (arg.startsWith("--trust-store-password=")) {
         trustStorePassword = arg.substring("--trust-store-password=".length());
+      } else if (arg.startsWith("--trust-password=")) {
+        trustStorePassword = arg.substring("--trust-password=".length());
       } else if ("--trust-store-password".equals(arg)) {
         i = advanceWithValue(argList, i, "--trust-store-password");
+        trustStorePassword = argList.get(i);
+      } else if ("--trust-password".equals(arg)) {
+        i = advanceWithValue(argList, i, "--trust-password");
         trustStorePassword = argList.get(i);
       } else if ("--require-pa".equals(arg)) {
         requirePA = true;
       } else if ("--require-aa".equals(arg)) {
+        requireAA = true;
+      } else if ("--aa".equals(arg)) {
         requireAA = true;
       } else if ("--corrupt-dg2".equals(arg)) {
         corruptDG2 = true;
@@ -188,10 +202,16 @@ public class ReadDG1Main {
       } else if ("--ta-key".equals(arg)) {
         i = advanceWithValue(argList, i, "--ta-key");
         taKeyPath = Paths.get(argList.get(i));
+      } else if (arg.startsWith("--out=")) {
+        jsonOutPath = Paths.get(arg.substring("--out=".length()));
+      } else if ("--out".equals(arg)) {
+        i = advanceWithValue(argList, i, "--out");
+        jsonOutPath = Paths.get(argList.get(i));
       }
     }
 
     // Boot emulator & install applet
+    SessionReport report = new SessionReport();
     CardSimulator sim = new CardSimulator();
     AID aid = new AID(MRTD_AID, (short)0, (byte)MRTD_AID.length);
     sim.installApplet(aid, sos.passportapplet.PassportApplet.class);
@@ -199,6 +219,7 @@ public class ReadDG1Main {
     CardTerminal term = CardTerminalSimulator.terminal(sim);
     Card card = term.connect("*");
     CardChannel ch = card.getBasicChannel();
+    report.session.transport = resolveTransport(term, card);
 
     // SELECT AID
     apdu(ch, 0x00, 0xA4, 0x04, 0x0C, MRTD_AID, "SELECT AID");
@@ -249,6 +270,8 @@ public class ReadDG1Main {
 
     PaceKeySelection paceKeySelection = buildPaceKeySelection(can, pin, puk, bacKey);
     PaceOutcome paceOutcome = attemptPACE(svc, attemptPace, paceKeySelection, paceInfos);
+    report.session.paceAttempted = paceOutcome.attempted;
+    report.session.paceEstablished = paceOutcome.established;
     if (paceOutcome.attempted) {
       logPaceOutcome(paceOutcome);
     } else {
@@ -268,10 +291,17 @@ public class ReadDG1Main {
     }
 
     DG14File dg14 = readDG14(svc);
+    if (dg14 != null) {
+      report.dataGroups.addPresent(14);
+    }
     ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(svc, dg14);
+    report.session.caEstablished = chipAuthOutcome.established;
     System.out.printf("caEstablished=%s%n", chipAuthOutcome.established);
 
     DG15File dg15 = readDG15(svc);
+    if (dg15 != null) {
+      report.dataGroups.addPresent(15);
+    }
     ActiveAuthOutcome activeAuthOutcome = performActiveAuthentication(loggingService, svc, dg15, requireAA);
     System.out.printf("aaAvailable=%s, aaVerified=%s%n", activeAuthOutcome.available, activeAuthOutcome.verified);
     if (requireAA && !activeAuthOutcome.verified) {
@@ -297,6 +327,8 @@ public class ReadDG1Main {
     if (terminalAuthOutcome.failure != null) {
       System.out.println("Terminal Authentication failure: " + terminalAuthOutcome.failure.getMessage());
     }
+    report.dataGroups.setDg3Readable(terminalAuthOutcome.dg3Readable);
+    report.dataGroups.setDg4Readable(terminalAuthOutcome.dg4Readable);
 
     // baca DG1 (MRZ)
     try (InputStream in = svc.getInputStream(PassportService.EF_DG1)) {
@@ -308,6 +340,7 @@ public class ReadDG1Main {
       System.out.println("DOE  : " + info.getDateOfExpiry());
       System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
       System.out.println("Gender: " + info.getGender()); // jmrtd 0.8.x
+      report.dataGroups.addPresent(1);
     }
 
     if (trustStorePath == null) {
@@ -322,15 +355,33 @@ public class ReadDG1Main {
       char[] passwordChars = trustStorePassword != null ? trustStorePassword.toCharArray() : null;
       PassiveAuthentication.Result paResult = PassiveAuthentication.verify(svc, trustStorePath, passwordChars);
       paResult.printReport();
+      report.setPassiveAuthentication(paResult);
       if (requirePA && !paResult.isPass()) {
         throw new RuntimeException("Passive Authentication failed but was required");
       }
       if (passwordChars != null) {
         Arrays.fill(passwordChars, '\0');
       }
+    } else {
+      report.setPassiveAuthentication(null);
     }
 
-    printDG2Summary(svc, largeDG2);
+    Dg2Metadata dg2Metadata = summarizeDG2(svc, largeDG2);
+    if (dg2Metadata != null) {
+      report.dataGroups.addPresent(2);
+      report.dataGroups.setDg2Metadata(dg2Metadata);
+    }
+    report.setActiveAuthentication(activeAuthOutcome, requireAA);
+    report.session.smMode = resolveSecureMessagingMode(paceOutcome, chipAuthOutcome);
+
+    if (jsonOutPath != null) {
+      try {
+        report.write(jsonOutPath);
+        System.out.println("JSON report written to " + jsonOutPath.toAbsolutePath());
+      } catch (IOException e) {
+        System.out.println("Failed to write JSON report: " + e.getMessage());
+      }
+    }
   }
 
   private static int advanceWithValue(List<String> args, int index, String option) {
@@ -499,6 +550,22 @@ public class ReadDG1Main {
       index++;
     }
     return Arrays.copyOfRange(input, index, input.length);
+  }
+
+  private static String resolveTransport(CardTerminal terminal, Card card) {
+    if (card != null) {
+      String protocol = card.getProtocol();
+      if (protocol != null && !protocol.isBlank()) {
+        return protocol;
+      }
+    }
+    if (terminal != null) {
+      String name = terminal.getName();
+      if (name != null && !name.isBlank()) {
+        return name;
+      }
+    }
+    return "SIMULATOR";
   }
 
   private static byte[] readEfPlain(CardChannel ch, short fid) {
@@ -1302,6 +1369,321 @@ public class ReadDG1Main {
     Exception failure;
   }
 
+  private static final class Dg2FaceSummary {
+    final int faceIndex;
+    final int imageIndex;
+    final int width;
+    final int height;
+    final String mimeType;
+    final int length;
+    final int quality;
+    final String imageType;
+
+    Dg2FaceSummary(int faceIndex,
+                   int imageIndex,
+                   int width,
+                   int height,
+                   String mimeType,
+                   int length,
+                   int quality,
+                   String imageType) {
+      this.faceIndex = faceIndex;
+      this.imageIndex = imageIndex;
+      this.width = width;
+      this.height = height;
+      this.mimeType = mimeType;
+      this.length = length;
+      this.quality = quality;
+      this.imageType = imageType;
+    }
+  }
+
+  private static final class Dg2Metadata {
+    final int length;
+    final boolean largeScenario;
+    final boolean truncated;
+    final List<Dg2FaceSummary> faces;
+
+    Dg2Metadata(int length, boolean largeScenario, boolean truncated, List<Dg2FaceSummary> faces) {
+      this.length = length;
+      this.largeScenario = largeScenario;
+      this.truncated = truncated;
+      this.faces = faces;
+    }
+  }
+
+  private static final class SessionReport {
+    final Session session = new Session();
+    PassiveAuth passiveAuth = PassiveAuth.notRun();
+    ActiveAuth activeAuth = ActiveAuth.fromOutcome(null, false);
+    final DataGroups dataGroups = new DataGroups();
+
+    void setPassiveAuthentication(PassiveAuthentication.Result result) {
+      this.passiveAuth = PassiveAuth.fromResult(result);
+    }
+
+    void setActiveAuthentication(ActiveAuthOutcome outcome, boolean requireAA) {
+      this.activeAuth = ActiveAuth.fromOutcome(outcome, requireAA);
+    }
+
+    void write(Path output) throws IOException {
+      Path parent = output.getParent();
+      if (parent != null) {
+        Files.createDirectories(parent);
+      }
+      Files.writeString(output, toJson());
+    }
+
+    String toJson() {
+      StringBuilder sb = new StringBuilder();
+      sb.append("{\n");
+      sb.append("  \"session\": ").append(session.toJson("  ")).append(",\n");
+      sb.append("  \"pa\": ").append(passiveAuth.toJson("  ")).append(",\n");
+      sb.append("  \"aa\": ").append(activeAuth.toJson("  ")).append(",\n");
+      sb.append("  \"dg\": ").append(dataGroups.toJson("  ")).append('\n');
+      sb.append("}\n");
+      return sb.toString();
+    }
+
+    static final class Session {
+      String transport;
+      String smMode;
+      boolean paceAttempted;
+      boolean paceEstablished;
+      boolean caEstablished;
+
+      String toJson(String indent) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"transport\":").append(toJsonString(transport)).append(',');
+        sb.append("\"smMode\":").append(toJsonString(smMode)).append(',');
+        sb.append("\"paceAttempted\":").append(paceAttempted);
+        sb.append(',');
+        sb.append("\"paceEstablished\":").append(paceEstablished);
+        sb.append(',');
+        sb.append("\"caEstablished\":").append(caEstablished);
+        sb.append('}');
+        return sb.toString();
+      }
+    }
+
+    static final class PassiveAuth {
+      final boolean executed;
+      final String algorithm;
+      final List<Integer> ok;
+      final List<Integer> bad;
+      final List<Integer> missing;
+      final String signer;
+      final String chainStatus;
+      final String verdict;
+
+      PassiveAuth(boolean executed,
+                  String algorithm,
+                  List<Integer> ok,
+                  List<Integer> bad,
+                  List<Integer> missing,
+                  String signer,
+                  String chainStatus,
+                  String verdict) {
+        this.executed = executed;
+        this.algorithm = algorithm;
+        this.ok = ok;
+        this.bad = bad;
+        this.missing = missing;
+        this.signer = signer;
+        this.chainStatus = chainStatus;
+        this.verdict = verdict;
+      }
+
+      static PassiveAuth fromResult(PassiveAuthentication.Result result) {
+        if (result == null) {
+          return notRun();
+        }
+        PassiveAuthentication.SignatureCheck sig = result.getSignatureCheck();
+        PassiveAuthentication.ChainValidation chain = result.getChainValidation();
+        String signer = sig != null ? sig.signerSubject : null;
+        String chainStatus = null;
+        if (chain != null) {
+          chainStatus = (chain.chainOk ? "OK" : "FAIL") +
+              (chain.message != null && !chain.message.isBlank() ? (" - " + chain.message) : "");
+        }
+        return new PassiveAuth(
+            true,
+            result.getDigestAlgorithm(),
+            result.getOkDataGroups(),
+            result.getBadDataGroups(),
+            result.getMissingDataGroups(),
+            signer,
+            chainStatus,
+            result.verdict());
+      }
+
+      static PassiveAuth notRun() {
+        return new PassiveAuth(false, null, List.of(), List.of(), List.of(), null, null, "SKIPPED");
+      }
+
+      String toJson(String indent) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        sb.append("\"executed\":").append(executed).append(',');
+        sb.append("\"algorithm\":").append(toJsonString(algorithm)).append(',');
+        sb.append("\"okDGs\":").append(intList(ok)).append(',');
+        sb.append("\"badDGs\":").append(intList(bad)).append(',');
+        sb.append("\"missingDGs\":").append(intList(missing)).append(',');
+        sb.append("\"signer\":").append(toJsonString(signer)).append(',');
+        sb.append("\"chainStatus\":").append(toJsonString(chainStatus)).append(',');
+        sb.append("\"verdict\":").append(toJsonString(verdict));
+        sb.append('}');
+        return sb.toString();
+      }
+    }
+
+    static final class ActiveAuth {
+      final boolean enabled;
+      final boolean supported;
+      final String algorithm;
+      final boolean verified;
+
+      ActiveAuth(boolean enabled, boolean supported, String algorithm, boolean verified) {
+        this.enabled = enabled;
+        this.supported = supported;
+        this.algorithm = algorithm;
+        this.verified = verified;
+      }
+
+      static ActiveAuth fromOutcome(ActiveAuthOutcome outcome, boolean requireAA) {
+        if (outcome == null) {
+          return new ActiveAuth(requireAA, false, null, false);
+        }
+        String algorithm = outcome.publicKey != null ? outcome.publicKey.getAlgorithm() : null;
+        boolean enabled = requireAA || outcome.attempted;
+        return new ActiveAuth(enabled, outcome.available, algorithm, outcome.verified);
+      }
+
+      String toJson(String indent) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        sb.append("\"enabled\":").append(enabled).append(',');
+        sb.append("\"supported\":").append(supported).append(',');
+        sb.append("\"algorithm\":").append(toJsonString(algorithm)).append(',');
+        sb.append("\"verified\":").append(verified);
+        sb.append('}');
+        return sb.toString();
+      }
+    }
+
+    static final class DataGroups {
+      private final List<Integer> present = new ArrayList<>();
+      private boolean dg3Readable;
+      private boolean dg4Readable;
+      private Dg2Metadata dg2Metadata;
+
+      void addPresent(int dg) {
+        if (!present.contains(dg)) {
+          present.add(dg);
+        }
+      }
+
+      void setDg3Readable(boolean readable) {
+        this.dg3Readable = readable;
+        if (readable) {
+          addPresent(3);
+        }
+      }
+
+      void setDg4Readable(boolean readable) {
+        this.dg4Readable = readable;
+        if (readable) {
+          addPresent(4);
+        }
+      }
+
+      void setDg2Metadata(Dg2Metadata metadata) {
+        this.dg2Metadata = metadata;
+      }
+
+      String toJson(String indent) {
+        present.sort(Comparator.naturalOrder());
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        sb.append("\"present\":").append(intList(present)).append(',');
+        sb.append("\"dg3Readable\":").append(dg3Readable).append(',');
+        sb.append("\"dg4Readable\":").append(dg4Readable).append(',');
+        sb.append("\"dg2\":").append(dg2ToJson(dg2Metadata));
+        sb.append('}');
+        return sb.toString();
+      }
+
+      private String dg2ToJson(Dg2Metadata metadata) {
+        if (metadata == null) {
+          return "null";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        sb.append("\"length\":").append(metadata.length).append(',');
+        sb.append("\"largeScenario\":").append(metadata.largeScenario).append(',');
+        sb.append("\"truncated\":").append(metadata.truncated).append(',');
+        sb.append("\"faces\":").append(faceList(metadata.faces));
+        sb.append('}');
+        return sb.toString();
+      }
+
+      private String faceList(List<Dg2FaceSummary> faces) {
+        if (faces == null || faces.isEmpty()) {
+          return "[]";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append('[');
+        for (int i = 0; i < faces.size(); i++) {
+          Dg2FaceSummary face = faces.get(i);
+          if (i > 0) {
+            sb.append(',');
+          }
+          sb.append('{');
+          sb.append("\"faceIndex\":").append(face.faceIndex).append(',');
+          sb.append("\"imageIndex\":").append(face.imageIndex).append(',');
+          sb.append("\"width\":").append(face.width).append(',');
+          sb.append("\"height\":").append(face.height).append(',');
+          sb.append("\"mimeType\":").append(toJsonString(face.mimeType)).append(',');
+          sb.append("\"length\":").append(face.length).append(',');
+          sb.append("\"quality\":").append(face.quality).append(',');
+          sb.append("\"imageType\":").append(toJsonString(face.imageType));
+          sb.append('}');
+        }
+        sb.append(']');
+        return sb.toString();
+      }
+    }
+
+    private static String toJsonString(String value) {
+      if (value == null) {
+        return "null";
+      }
+      String escaped = value
+          .replace("\\", "\\\\")
+          .replace("\"", "\\\"")
+          .replace("\n", "\\n")
+          .replace("\r", "\\r");
+      return '"' + escaped + '"';
+    }
+
+    private static String intList(List<Integer> values) {
+      if (values == null || values.isEmpty()) {
+        return "[]";
+      }
+      StringBuilder sb = new StringBuilder();
+      sb.append('[');
+      for (int i = 0; i < values.size(); i++) {
+        if (i > 0) {
+          sb.append(',');
+        }
+        sb.append(values.get(i));
+      }
+      sb.append(']');
+      return sb.toString();
+    }
+  }
+
   private static final class WrappedCardVerifiableCertificate extends CardVerifiableCertificate {
     WrappedCardVerifiableCertificate(CVCertificate certificate) throws ConstructionException {
       super(certificate);
@@ -1349,30 +1731,31 @@ public class ReadDG1Main {
     }
   }
 
-  private static void printDG2Summary(PassportService svc, boolean largeScenario) {
+  private static Dg2Metadata summarizeDG2(PassportService svc, boolean largeScenario) {
     byte[] dg2Bytes;
     try (InputStream in = svc.getInputStream(PassportService.EF_DG2)) {
       if (in == null) {
         System.out.println("DG2 not present");
-        return;
+        return null;
       }
       dg2Bytes = in.readAllBytes();
     } catch (Exception e) {
       System.out.println("DG2 read error: " + e.getMessage());
-      return;
+      return null;
     }
 
     final int warningThreshold = 120_000;
     if (dg2Bytes.length > warningThreshold) {
       System.out.printf("DG2 size %d bytes exceeds safe threshold (%d). Skipping detailed parse.%n",
           dg2Bytes.length, warningThreshold);
-      return;
+      return new Dg2Metadata(dg2Bytes.length, largeScenario, true, List.of());
     }
 
     try (ByteArrayInputStream in = new ByteArrayInputStream(dg2Bytes)) {
       DG2File dg2 = new DG2File(in);
       List<FaceInfo> faceInfos = dg2.getFaceInfos();
       int faceCount = 0;
+      List<Dg2FaceSummary> faces = new ArrayList<>();
       System.out.println("---- DG2 Metadata ----");
       for (int i = 0; i < faceInfos.size(); i++) {
         FaceInfo faceInfo = faceInfos.get(i);
@@ -1385,6 +1768,15 @@ public class ReadDG1Main {
               img.getWidth(), img.getHeight(),
               img.getMimeType(), img.getImageLength(),
               img.getQuality(), describeImageType(img.getImageDataType()));
+          faces.add(new Dg2FaceSummary(
+              i + 1,
+              j + 1,
+              img.getWidth(),
+              img.getHeight(),
+              img.getMimeType(),
+              img.getImageLength(),
+              img.getQuality(),
+              describeImageType(img.getImageDataType())));
         }
       }
       System.out.printf("Total faces: %d%n", faceCount);
@@ -1395,8 +1787,10 @@ public class ReadDG1Main {
         System.out.println("(DG2 generated in large-image scenario)");
       }
       System.out.println("----------------------");
+      return new Dg2Metadata(dg2Bytes.length, largeScenario, false, faces);
     } catch (IOException | RuntimeException e) {
       System.out.println("DG2 parse error: " + e.getMessage());
+      return new Dg2Metadata(dg2Bytes.length, largeScenario, false, List.of());
     }
   }
 
@@ -1408,6 +1802,36 @@ public class ReadDG1Main {
       return "JPEG2000";
     }
     return "type=" + imageDataType;
+  }
+
+  private static String resolveSecureMessagingMode(PaceOutcome paceOutcome, ChipAuthOutcome chipOutcome) {
+    if (chipOutcome != null && chipOutcome.established) {
+      String cipher = null;
+      if (chipOutcome.selectedInfo != null) {
+        String oid = chipOutcome.selectedInfo.getObjectIdentifier();
+        if (oid != null) {
+          try {
+            cipher = ChipAuthenticationInfo.toCipherAlgorithm(oid);
+          } catch (Exception ignore) {
+            cipher = null;
+          }
+        }
+      }
+      if (cipher != null) {
+        String normalized = cipher.toUpperCase(Locale.ROOT);
+        if (normalized.contains("AES")) {
+          return "CA_AES";
+        }
+        if (normalized.contains("DESEDE") || normalized.contains("DES")) {
+          return "CA_3DES";
+        }
+      }
+      return "CA";
+    }
+    if (paceOutcome != null && paceOutcome.established) {
+      return "PACE";
+    }
+    return "BAC";
   }
 
   private static byte[] buildMrzSeed(String doc, String dob, String doe) {

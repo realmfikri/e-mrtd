@@ -34,7 +34,15 @@ final class LoggingCardService extends CardService {
 
   @Override
   public boolean isConnectionLost(Exception e) {
-    return delegate.isConnectionLost(e);
+    try {
+      return delegate.isConnectionLost(e);
+    } catch (AbstractMethodError error) {
+      // Older CardService implementations (like TerminalCardService from the
+      // version bundled with net.sf.scuba) don't provide the newer
+      // isConnectionLost hook. Fall back to the pre-hook behaviour, which is to
+      // treat all exceptions as non-fatal and let callers decide.
+      return false;
+    }
   }
 
   @Override
