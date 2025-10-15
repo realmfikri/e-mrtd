@@ -75,6 +75,30 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --large-dg
 ```
 - Generates an oversized DG2 to test system safeguards against excessive biometrics.
 
+### PACE with MRZ Secret
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --attempt-pace --doc=123456789 --dob=750101 --doe=250101'
+```
+- Personalises the chip, then authenticates with PACE using the MRZ-derived secret.
+- Falls back to BAC automatically if PACE is not available or negotiation fails.
+
+### PACE with Seeded CAN Secret
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --attempt-pace --can=123456 --doc=123456789 --dob=750101 --doe=250101'
+```
+- Seeds the CAN value into the chip via `PUT DATA 0x65` and immediately uses it for PACE.
+- Replace `--can` with `--pin` or `--puk` to exercise the alternative credential containers.
+
+### BAC Fallback after Incorrect CAN
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --attempt-pace --can=000000 --doc=123456789 --dob=750101 --doe=250101'
+```
+- Demonstrates graceful failure when the provided CAN does not match the seeded value.
+- Observe the log message `PACE failed` followed by `Falling back to BAC secure messaging.`
+
 Add the repeatable flag `--ta-cvc <path/to/cvc>` to load terminal authentication certificates for reporting. The host will parse and summarise the supplied CVCs without attempting to sign challenges.
 
 When running inside a headless shell (e.g. CI), prepend `JAVA_TOOL_OPTIONS=-Djava.awt.headless=true` so the synthetic biometric generator can render without an X server.
@@ -108,15 +132,18 @@ Use these paths for navigation when inspecting or modifying code.
 | Happy Path (Issuance + PA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --require-pa' ``` | Demonstrates full workflow with successful passive authentication. |
 | Corrupted DG2 | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --require-pa --corrupt-dg2' ``` | Ensures metadata extractor and PA fail closed on tampered biometric data. |
 | Oversized DG2 | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --large-dg2' ``` | Validates large-file guardrails; DG2 parsing is skipped with a clear warning. |
+| PACE with MRZ | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --doc=123456789 --dob=750101 --doe=250101' ``` | Confirms MRZ-derived PACE succeeds when secrets align. |
+| PACE with CAN | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=123456 --doc=123456789 --dob=750101 --doe=250101' ``` | Seeds and consumes a CAN credential for PACE; adapt to `--pin/--puk` as needed. |
+| BAC Fallback | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=000000 --doc=123456789 --dob=750101 --doe=250101' ``` | Illustrates automatic BAC fallback after a failed CAN-based PACE attempt. |
 
 ## 🛡️ Security Features
 Implemented hardening features include:
 - **Basic Access Control (BAC)** for initial session establishment.
-- **PACE-first Negotiation** using EF.CardAccess data, falling back to BAC if PACE fails while keeping the stronger secure-messaging wrapper when it succeeds.
+- **PACE-first Negotiation** using EF.CardAccess data, with host CLI options for MRZ, CAN, PIN, or PUK secrets and automatic BAC fallback when negotiation fails.
 - **EF.CardAccess/DG14 Provisioning** during personalization so host tooling can exercise PACE/EAC awareness immediately.
 - **Chip Authentication Awareness** with DG14 parsing and secure-messaging upgrade when the card advertises CA support.
 - **Terminal Authentication Reporting** – DG14 TA metadata is surfaced and user-supplied CVCs are parsed for inspection (host-side only, no signing yet).
-- *Note*: the reference applet does not yet implement PACE or chip-auth cryptography, so runs will log a graceful failure and revert to BAC-protected messaging.
+- **PACE GM Implementation** on the applet side enables full AES secure messaging once the correct secret is provided.
 - **Demo TA Certificate Generator** to mint synthetic CVCs for immediate TA inspection testing.
 - **Secure Messaging (AES + MAC)** to protect APDU exchanges.
 - **Anti-Replay Protection** through SSC monotonicity checks.
@@ -127,7 +154,7 @@ Implemented hardening features include:
 
 ## 🧭 Roadmap
 Upcoming enhancements (not yet implemented):
-- **Chip-side PACE & Chip Authentication** so the emulator can complete the stronger sessions it now advertises.
+- **Additional PACE mappings and Chip Authentication refinements** to broaden interoperability beyond the current GM profile.
 - **Terminal Authentication signing** flows to exercise EAC TA challenge/response.
 - **Active Authentication** handshake support and negative-case scenarios.
 - **Extended PACE options** (PIN/PUK/CAN inputs) and richer error-injection scenarios.
