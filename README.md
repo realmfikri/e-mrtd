@@ -90,6 +90,8 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 ```
 - Seeds the CAN value into the chip via `PUT DATA 0x65` and immediately uses it for PACE.
 - Replace `--can` with `--pin` or `--puk` to exercise the alternative credential containers.
+- Expect the log line `PUT PACE secrets TLV → SW=9000`. A status word `6A80` means the host is still emitting the old, nested
+  TLV format—run `mvn -q -DskipTests package` (or `mvn clean package`) to rebuild the CLI before retrying.
 
 ### BAC Fallback after Incorrect CAN
 ```bash

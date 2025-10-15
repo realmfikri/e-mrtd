@@ -177,12 +177,19 @@ public class ReadDG1Main {
     // --- langkah penting: tanam kunci BAC di applet ---
     if (seed) {
       byte[] mrzSeed = buildMrzSeed(doc, dob, doe);
-      boolean ok = putData(ch, 0x00, 0x62, mrzSeed, "PUT MRZ TLV");
-      if (!ok) throw new RuntimeException("SET BAC via PUT DATA gagal. Cek format TLV.");
+      int sw = putData(ch, 0x00, 0x62, mrzSeed, "PUT MRZ TLV");
+      if (sw != 0x9000) {
+        throw new RuntimeException(String.format(
+            "SET BAC via PUT DATA gagal (SW=%04X). Cek format TLV.", sw));
+      }
       byte[] paceSecretsTlv = buildPaceSecretsTlv(can, pin, puk);
       if (paceSecretsTlv != null) {
-        ok = putData(ch, 0x00, 0x65, paceSecretsTlv, "PUT PACE secrets TLV");
-        if (!ok) throw new RuntimeException("SET PACE secrets via PUT DATA gagal. Cek format TLV.");
+        sw = putData(ch, 0x00, 0x65, paceSecretsTlv, "PUT PACE secrets TLV");
+        if (sw != 0x9000) {
+          throw new RuntimeException(String.format(
+              "SET PACE secrets via PUT DATA gagal (SW=%04X). Cek format TLV (tag 0x66 entries berisi [keyRef||secret]).",
+              sw));
+        }
       }
     }
 
@@ -842,10 +849,11 @@ public class ReadDG1Main {
     }
   }
 
-  private static boolean putData(CardChannel ch, int p1, int p2, byte[] data, String label) throws Exception {
+  private static int putData(CardChannel ch, int p1, int p2, byte[] data, String label) throws Exception {
     ResponseAPDU r = ch.transmit(new CommandAPDU(0x00, 0xDA, p1, p2, data)); // ISO7816 PUT DATA
-    System.out.printf("%s → SW=%04X%n", label, r.getSW());
-    return r.getSW() == 0x9000;
+    int sw = r.getSW();
+    System.out.printf("%s → SW=%04X%n", label, sw);
+    return sw;
   }
 
   private static ResponseAPDU apdu(CardChannel ch, int cla, int ins, int p1, int p2, byte[] data, String label) throws Exception {
