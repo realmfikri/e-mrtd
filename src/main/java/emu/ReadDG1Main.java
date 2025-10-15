@@ -981,11 +981,10 @@ public class ReadDG1Main {
       return null;
     }
 
-    ByteArrayOutputStream container = new ByteArrayOutputStream();
-    container.write(0x65);
-    writeLength(container, entryBytes.length);
-    container.write(entryBytes, 0, entryBytes.length);
-    return container.toByteArray();
+    // PassportApplet expects the APDU body to be a sequence of 0x66 entries
+    // (with the key reference as the first byte of each value).  Do not wrap
+    // them in an extra 0x65 TLV, because P2 already encodes that container.
+    return entryBytes;
   }
 
   private static void appendPaceSecretEntry(ByteArrayOutputStream out, byte keyReference, String value) {
