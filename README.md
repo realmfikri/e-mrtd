@@ -101,6 +101,15 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 - Demonstrates graceful failure when the provided CAN does not match the seeded value.
 - Observe the log message `PACE failed` followed by `Falling back to BAC secure messaging.`
 
+### Active Authentication Verification (RSA)
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --attempt-pace --require-aa'
+```
+- Establishes PACE (or falls back to BAC), reads DG15, performs `INTERNAL AUTHENTICATE`, and verifies the RSA signature using the DG15 public key.
+- The run fails with an exception if the card does not prove knowledge of the AA private key (or if DG15 is missing) because `--require-aa` enforces a pass verdict.
+- During personalization the log must show `PUT AA modulus TLV → SW=9000` and `PUT AA exponent TLV → SW=9000`; any other status word means the AA key was not provisioned and the subsequent verification will fail.
+
 Add the repeatable flag `--ta-cvc <path/to/cvc>` to load terminal authentication certificates for reporting. Supply a valid CVC file (for example, one produced by `GenerateDemoCvcMain`, see below); the host will parse and summarise the supplied CVCs without attempting to sign challenges.
 
 When running inside a headless shell (e.g. CI), prepend `JAVA_TOOL_OPTIONS=-Djava.awt.headless=true` so the synthetic biometric generator can render without an X server.
@@ -137,6 +146,7 @@ Use these paths for navigation when inspecting or modifying code.
 | PACE with MRZ | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --doc=123456789 --dob=750101 --doe=250101' ``` | Confirms MRZ-derived PACE succeeds when secrets align. |
 | PACE with CAN | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=123456 --doc=123456789 --dob=750101 --doe=250101' ``` | Seeds and consumes a CAN credential for PACE; adapt to `--pin/--puk` as needed. |
 | BAC Fallback | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=000000 --doc=123456789 --dob=750101 --doe=250101' ``` | Illustrates automatic BAC fallback after a failed CAN-based PACE attempt. |
+| Active Authentication (RSA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --require-aa' ``` | Forces a DG15-backed RSA AA verification; check for both `PUT AA ... → SW=9000` lines during seeding before the signature test. |
 
 ## 🛡️ Security Features
 Implemented hardening features include:
@@ -145,6 +155,7 @@ Implemented hardening features include:
 - **EF.CardAccess/DG14 Provisioning** during personalization so host tooling can exercise PACE/EAC awareness immediately.
 - **Chip Authentication Awareness** with DG14 parsing and secure-messaging upgrade when the card advertises CA support.
 - **Terminal Authentication Reporting** – DG14 TA metadata is surfaced and user-supplied CVCs are parsed for inspection (host-side only, no signing yet).
+- **Active Authentication Verification** – Host performs `INTERNAL AUTHENTICATE` and validates the RSA signature using the DG15 public key when requested with `--require-aa`.
 - **PACE GM Implementation** on the applet side enables full AES secure messaging once the correct secret is provided.
 - **Demo TA Certificate Generator** to mint synthetic CVCs for immediate TA inspection testing.
 - **Secure Messaging (AES + MAC)** to protect APDU exchanges.
@@ -158,7 +169,7 @@ Implemented hardening features include:
 Upcoming enhancements (not yet implemented):
 - **Additional PACE mappings and Chip Authentication refinements** to broaden interoperability beyond the current GM profile.
 - **Terminal Authentication signing** flows to exercise EAC TA challenge/response.
-- **Active Authentication** handshake support and negative-case scenarios.
+- **Active Authentication negative cases and ECDSA support** for broader credential coverage.
 - **Extended PACE options** (PIN/PUK/CAN inputs) and richer error-injection scenarios.
 
 ## 🤝 Contributing
