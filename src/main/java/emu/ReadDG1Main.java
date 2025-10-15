@@ -108,6 +108,7 @@ public class ReadDG1Main {
     boolean corruptDG2 = false;
     boolean largeDG2 = false;
     boolean attemptPace = false;
+    boolean paceCam = false;
     Path trustStorePath = null;
     String trustStorePassword = null;
     boolean requirePA = false;
@@ -128,6 +129,8 @@ public class ReadDG1Main {
         seed = true;
       } else if ("--attempt-pace".equals(arg)) {
         attemptPace = true;
+      } else if ("--pace-cam".equals(arg)) {
+        paceCam = true;
       } else if (arg.startsWith("--trust-store=")) {
         trustStorePath = Paths.get(arg.substring("--trust-store=".length()));
       } else if ("--trust-store".equals(arg)) {
@@ -162,20 +165,20 @@ public class ReadDG1Main {
         i = advanceWithValue(argList, i, "--doe");
         doe = argList.get(i);
       } else if (arg.startsWith("--can=")) {
-        can = arg.substring("--can=".length());
+        can = normalizeSecret(arg.substring("--can=".length()));
       } else if ("--can".equals(arg)) {
         i = advanceWithValue(argList, i, "--can");
-        can = argList.get(i);
+        can = normalizeSecret(argList.get(i));
       } else if (arg.startsWith("--pin=")) {
-        pin = arg.substring("--pin=".length());
+        pin = normalizeSecret(arg.substring("--pin=".length()));
       } else if ("--pin".equals(arg)) {
         i = advanceWithValue(argList, i, "--pin");
-        pin = argList.get(i);
+        pin = normalizeSecret(argList.get(i));
       } else if (arg.startsWith("--puk=")) {
-        puk = arg.substring("--puk=".length());
+        puk = normalizeSecret(arg.substring("--puk=".length()));
       } else if ("--puk".equals(arg)) {
         i = advanceWithValue(argList, i, "--puk");
-        puk = argList.get(i);
+        puk = normalizeSecret(argList.get(i));
       } else if (arg.startsWith("--ta-cvc=")) {
         taCvcPaths.add(Paths.get(arg.substring("--ta-cvc=".length())));
       } else if ("--ta-cvc".equals(arg)) {
@@ -258,7 +261,11 @@ public class ReadDG1Main {
       svc.doBAC(bacKey);
     }
 
-    System.out.printf("paceAttempted=%s, paceEstablished=%s%n", paceOutcome.attempted, paceOutcome.established);
+    System.out.printf(
+        "paceAttempted=%s, paceEstablished=%s, paceCamRequested=%s%n",
+        paceOutcome.attempted,
+        paceOutcome.established,
+        paceCam);
     byte[] cardAccessPostAuth = readEf(svc, PassportService.EF_CARD_ACCESS);
     if (cardAccessPostAuth != null && (rawCardAccess == null || rawCardAccess.length == 0)) {
       System.out.printf("EF.CardAccess (post-auth) length=%d bytes%n", cardAccessPostAuth.length);
@@ -267,6 +274,24 @@ public class ReadDG1Main {
 
     DG14File dg14 = readDG14(svc);
     ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(svc, dg14);
+    if (paceCam) {
+      if (!paceOutcome.established) {
+        if (!paceOutcome.attempted) {
+          throw new RuntimeException("--pace-cam requires --attempt-pace and a successful PACE session");
+        }
+        throw new RuntimeException("--pace-cam requires a successful PACE session");
+      }
+      if (dg14 == null) {
+        throw new RuntimeException("--pace-cam requires DG14 to advertise Chip Authentication");
+      }
+      if (!chipAuthOutcome.established) {
+        String message = "Chip Authentication did not establish secure messaging while --pace-cam was set";
+        if (chipAuthOutcome.failure != null && chipAuthOutcome.failure.getMessage() != null) {
+          message += ": " + chipAuthOutcome.failure.getMessage();
+        }
+        throw new RuntimeException(message);
+      }
+    }
     System.out.printf("caEstablished=%s%n", chipAuthOutcome.established);
 
     DG15File dg15 = readDG15(svc);
@@ -527,23 +552,26 @@ public class ReadDG1Main {
   }
 
   private static PaceKeySelection buildPaceKeySelection(String can, String pin, String puk, BACKey bacKey) {
-    if (hasText(can)) {
+    String sanitizedCan = normalizeSecret(can);
+    if (hasText(sanitizedCan)) {
       try {
-        return new PaceKeySelection(PACEKeySpec.createCANKey(can), "CAN", null);
+        return new PaceKeySelection(PACEKeySpec.createCANKey(sanitizedCan), "CAN", null);
       } catch (Exception e) {
         return new PaceKeySelection(null, "CAN", e);
       }
     }
-    if (hasText(pin)) {
+    String sanitizedPin = normalizeSecret(pin);
+    if (hasText(sanitizedPin)) {
       try {
-        return new PaceKeySelection(PACEKeySpec.createPINKey(pin), "PIN", null);
+        return new PaceKeySelection(PACEKeySpec.createPINKey(sanitizedPin), "PIN", null);
       } catch (Exception e) {
         return new PaceKeySelection(null, "PIN", e);
       }
     }
-    if (hasText(puk)) {
+    String sanitizedPuk = normalizeSecret(puk);
+    if (hasText(sanitizedPuk)) {
       try {
-        return new PaceKeySelection(PACEKeySpec.createPUKKey(puk), "PUK", null);
+        return new PaceKeySelection(PACEKeySpec.createPUKKey(sanitizedPuk), "PUK", null);
       } catch (Exception e) {
         return new PaceKeySelection(null, "PUK", e);
       }
@@ -1431,10 +1459,11 @@ public class ReadDG1Main {
   }
 
   private static void appendPaceSecretEntry(ByteArrayOutputStream out, byte keyReference, String value) {
-    if (!hasText(value)) {
+    String sanitized = normalizeSecret(value);
+    if (!hasText(sanitized)) {
       return;
     }
-    byte[] valueBytes = value.getBytes(StandardCharsets.US_ASCII);
+    byte[] valueBytes = sanitized.getBytes(StandardCharsets.US_ASCII);
     ByteArrayOutputStream entry = new ByteArrayOutputStream();
     entry.write(keyReference);
     entry.write(valueBytes, 0, valueBytes.length);
@@ -1464,7 +1493,15 @@ public class ReadDG1Main {
     }
   }
 
+  private static String normalizeSecret(String value) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    return trimmed.isEmpty() ? null : trimmed;
+  }
+
   private static boolean hasText(String value) {
-    return value != null && !value.isEmpty();
+    return normalizeSecret(value) != null;
   }
 }

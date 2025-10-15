@@ -93,6 +93,23 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 - Expect the log line `PUT PACE secrets TLV → SW=9000`. A status word `6A80` means the host is still emitting the old, nested
   TLV format—run `mvn -q -DskipTests package` (or `mvn clean package`) to rebuild the CLI before retrying.
 
+### PACE with Stored CAN (No Seeding)
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--attempt-pace --can=123456'
+```
+- Demonstrates that the CLI now trims and consumes CAN/PIN/PUK values even when the chip was provisioned in an earlier run.
+- Omitting `--seed` leaves the existing secrets untouched; the supplied value is only used for the host-side PACE key derivation.
+
+### PACE → Chip Authentication Mapping (PACE-CAM)
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --attempt-pace --pace-cam --can=123456'
+```
+- Establishes PACE with the provided secret and immediately upgrades the secure channel via Chip Authentication.
+- The run aborts if PACE fails or if DG14 does not advertise a supported Chip Authentication profile, making it ideal for CAM regression testing.
+
+
 ### BAC Fallback after Incorrect CAN
 ```bash
 mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
@@ -148,6 +165,8 @@ Use these paths for navigation when inspecting or modifying code.
 | Oversized DG2 | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --large-dg2' ``` | Validates large-file guardrails; DG2 parsing is skipped with a clear warning. |
 | PACE with MRZ | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --doc=123456789 --dob=750101 --doe=250101' ``` | Confirms MRZ-derived PACE succeeds when secrets align. |
 | PACE with CAN | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=123456 --doc=123456789 --dob=750101 --doe=250101' ``` | Seeds and consumes a CAN credential for PACE; adapt to `--pin/--puk` as needed. |
+| PACE with Stored CAN | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--attempt-pace --can=123456' ``` | Uses an already-provisioned CAN/PIN/PUK without re-seeding; exercises trimmed secret handling. |
+| PACE → CA (PACE-CAM) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --pace-cam --can=123456' ``` | Forces the Chip Authentication upgrade immediately after PACE and fails fast if CAM is unavailable. |
 | BAC Fallback | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=000000 --doc=123456789 --dob=750101 --doe=250101' ``` | Illustrates automatic BAC fallback after a failed CAN-based PACE attempt. |
 | Active Authentication (RSA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --require-aa' ``` | Forces a DG15-backed RSA AA verification; check for both `PUT AA ... → SW=9000` lines during seeding before the signature test. |
 | Terminal Authentication (DG3/DG4) | ```bash mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain && mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key' ``` | Performs PACE→CA→TA with the demo chain and reports DG3/DG4 accessibility. |
@@ -155,7 +174,7 @@ Use these paths for navigation when inspecting or modifying code.
 ## 🛡️ Security Features
 Implemented hardening features include:
 - **Basic Access Control (BAC)** for initial session establishment.
-- **PACE-first Negotiation** using EF.CardAccess data, with host CLI options for MRZ, CAN, PIN, or PUK secrets and automatic BAC fallback when negotiation fails.
+- **PACE-first Negotiation** using EF.CardAccess data, with host CLI options for MRZ, CAN, PIN, or PUK secrets, whitespace-tolerant parsing, optional `--pace-cam` enforcement, and automatic BAC fallback when negotiation fails.
 - **EF.CardAccess/DG14 Provisioning** during personalization so host tooling can exercise PACE/EAC awareness immediately.
 - **Chip Authentication Awareness** with DG14 parsing and secure-messaging upgrade when the card advertises CA support.
 - **Terminal Authentication (TA)** – Host performs PSO:VERIFY CERT, protected GET CHALLENGE, and EXTERNAL AUTHENTICATE to unlock DG3/DG4 when provided with a CVCA→Terminal chain and private key.
@@ -173,7 +192,7 @@ Implemented hardening features include:
 Upcoming enhancements (not yet implemented):
 - **Additional PACE mappings and Chip Authentication refinements** to broaden interoperability beyond the current GM profile.
 - **Active Authentication negative cases and ECDSA support** for broader credential coverage.
-- **Extended PACE options** (PIN/PUK/CAN inputs) and richer error-injection scenarios.
+- **Additional PACE mappings** (e.g., Integrated Mapping) and richer error-injection scenarios beyond the current GM coverage.
 
 ## 🤝 Contributing
 1. Fork the repository.
