@@ -56,6 +56,9 @@ mvn -q -DskipTests clean package
 ## 🚀 Run Scenarios
 The main entry point is `emu.ReadDG1Main`, executing personalization + verification.
 
+> ℹ️ **Heads-up:** Run `mvn -q -DskipTests package` once after cloning or editing the project so the CLI classes are compiled
+> before invoking any of the scenarios below.
+
 ### Happy Path (Issuance + PA Verification)
 ```bash
 mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --require-pa'
@@ -92,6 +95,19 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 - Replace `--can` with `--pin` or `--puk` to exercise the alternative credential containers.
 - Expect the log line `PUT PACE secrets TLV → SW=9000`. A status word `6A80` means the host is still emitting the old, nested
   TLV format—run `mvn -q -DskipTests package` (or `mvn clean package`) to rebuild the CLI before retrying.
+
+### JSON Session Report Export
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --attempt-pace --out target/session-report.json'
+```
+- Produces a machine-readable summary at the path supplied to `--out` (directories are created on demand).
+- The JSON schema is stable and contains:
+  - `session`: transport name, active secure messaging mode (`BAC`, `PACE`, `CA_AES`, or `CA_3DES`), and authentication flags.
+  - `pa`: passive authentication verdict, signer subject, digest algorithm, and DG hash status.
+  - `aa`: Active Authentication toggle (CLI/attempt), card support, key algorithm, and verification result.
+  - `dg`: data groups read during the run plus DG3/DG4 accessibility and DG2 face metadata (dimensions, MIME, size).
+- `--trust` is accepted as an alias of `--trust-store`, and `--aa` is an alias of `--require-aa` when scripting flows.
 
 ### BAC Fallback after Incorrect CAN
 ```bash
@@ -151,6 +167,7 @@ Use these paths for navigation when inspecting or modifying code.
 | PACE with CAN | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=123456 --doc=123456789 --dob=750101 --doe=250101' ``` | Seeds and consumes a CAN credential for PACE; adapt to `--pin/--puk` as needed. |
 | BAC Fallback | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=000000 --doc=123456789 --dob=750101 --doe=250101' ``` | Illustrates automatic BAC fallback after a failed CAN-based PACE attempt. |
 | Active Authentication (RSA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --require-aa' ``` | Forces a DG15-backed RSA AA verification; check for both `PUT AA ... → SW=9000` lines during seeding before the signature test. |
+| JSON Session Report | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --out target/session-report.json' ``` | Emits `target/session-report.json` with session, PA, AA, and DG summaries for CI ingestion. |
 | TA Gating (no credentials) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --pace-cam' ``` | Demonstrates that DG3/DG4 remain inaccessible (`SW=6985`) when TA is skipped, even after PACE→CA. |
 | Terminal Authentication (DG3/DG4) | ```bash mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain && mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key' ``` | Performs PACE→CA→TA with the demo chain and reports DG3/DG4 accessibility. |
 
