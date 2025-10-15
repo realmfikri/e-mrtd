@@ -110,17 +110,20 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 - The run fails with an exception if the card does not prove knowledge of the AA private key (or if DG15 is missing) because `--require-aa` enforces a pass verdict.
 - During personalization the log must show `PUT AA modulus TLV → SW=9000` and `PUT AA exponent TLV → SW=9000`; any other status word means the AA key was not provisioned and the subsequent verification will fail.
 
-Add the repeatable flag `--ta-cvc <path/to/cvc>` to load terminal authentication certificates for reporting. Supply a valid CVC file (for example, one produced by `GenerateDemoCvcMain`, see below); the host will parse and summarise the supplied CVCs without attempting to sign challenges.
+To exercise Terminal Authentication (TA) you need a certificate chain and the reader's private key.
+
+### Terminal Authentication (DG3/DG4 Unlock)
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key'
+```
+- The generator emits a demo CVCA certificate, a terminal certificate signed by that CVCA, and the matching terminal private key under `target/ta-demo/`.
+- Supply the CVCA first and the terminal certificate second via the repeatable `--ta-cvc` flag, and point `--ta-key` at the terminal PKCS#8 PEM.
+- With the credentials present the host performs PACE, Chip Authentication, and the protected TA handshake; success is logged as `Terminal Authentication handshake completed.` followed by `EF.DG3`/`EF.DG4` access reports.
+- Omit `--ta-key` to stay in passive reporting mode when you only want CVC metadata summaries.
 
 When running inside a headless shell (e.g. CI), prepend `JAVA_TOOL_OPTIONS=-Djava.awt.headless=true` so the synthetic biometric generator can render without an X server.
-
-### Generate Demo TA Certificates
-```bash
-mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoCvcMain
-```
-- Produces `target/demo-terminal.cvc` and the matching private key `target/demo-terminal.key` (PKCS#8 PEM).
-- Default issuer/holder uses the `UT` test country code; supply `--country <alpha2>` if you need something else.
-- Combine the generated certificate with the reader using `--ta-cvc target/demo-terminal.cvc`.
 
 Each run logs:
 - Personalization steps and LDS writing.
@@ -128,7 +131,7 @@ Each run logs:
 - DG1 (MRZ) parsing output.
 - DG2 metadata (image size, MIME type, quality metrics).
 - Passive authentication results, including hash validation, signature verification, and trust chain status.
-- Session summary covering PACE attempts, BAC fallback decisions, chip authentication status, and terminal authentication insights.
+- Session summary covering PACE attempts, BAC fallback decisions, chip authentication status, and terminal authentication results (including DG3/DG4 access).
 
 ## 📁 Key Directories
 ```bash
@@ -147,6 +150,7 @@ Use these paths for navigation when inspecting or modifying code.
 | PACE with CAN | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=123456 --doc=123456789 --dob=750101 --doe=250101' ``` | Seeds and consumes a CAN credential for PACE; adapt to `--pin/--puk` as needed. |
 | BAC Fallback | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=000000 --doc=123456789 --dob=750101 --doe=250101' ``` | Illustrates automatic BAC fallback after a failed CAN-based PACE attempt. |
 | Active Authentication (RSA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --require-aa' ``` | Forces a DG15-backed RSA AA verification; check for both `PUT AA ... → SW=9000` lines during seeding before the signature test. |
+| Terminal Authentication (DG3/DG4) | ```bash mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain && mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key' ``` | Performs PACE→CA→TA with the demo chain and reports DG3/DG4 accessibility. |
 
 ## 🛡️ Security Features
 Implemented hardening features include:
@@ -154,10 +158,10 @@ Implemented hardening features include:
 - **PACE-first Negotiation** using EF.CardAccess data, with host CLI options for MRZ, CAN, PIN, or PUK secrets and automatic BAC fallback when negotiation fails.
 - **EF.CardAccess/DG14 Provisioning** during personalization so host tooling can exercise PACE/EAC awareness immediately.
 - **Chip Authentication Awareness** with DG14 parsing and secure-messaging upgrade when the card advertises CA support.
-- **Terminal Authentication Reporting** – DG14 TA metadata is surfaced and user-supplied CVCs are parsed for inspection (host-side only, no signing yet).
+- **Terminal Authentication (TA)** – Host performs PSO:VERIFY CERT, protected GET CHALLENGE, and EXTERNAL AUTHENTICATE to unlock DG3/DG4 when provided with a CVCA→Terminal chain and private key.
 - **Active Authentication Verification** – Host performs `INTERNAL AUTHENTICATE` and validates the RSA signature using the DG15 public key when requested with `--require-aa`.
 - **PACE GM Implementation** on the applet side enables full AES secure messaging once the correct secret is provided.
-- **Demo TA Certificate Generator** to mint synthetic CVCs for immediate TA inspection testing.
+- **Demo TA Chain Generator** (`GenerateDemoTaChainMain`) produces a CVCA→Terminal certificate chain and terminal key for quick TA testing.
 - **Secure Messaging (AES + MAC)** to protect APDU exchanges.
 - **Anti-Replay Protection** through SSC monotonicity checks.
 - **LDS Personalization** for EF.COM, EF.DG1, EF.DG2, EF.DG15, EF.SOD with synthetic face image generation.
@@ -168,7 +172,6 @@ Implemented hardening features include:
 ## 🧭 Roadmap
 Upcoming enhancements (not yet implemented):
 - **Additional PACE mappings and Chip Authentication refinements** to broaden interoperability beyond the current GM profile.
-- **Terminal Authentication signing** flows to exercise EAC TA challenge/response.
 - **Active Authentication negative cases and ECDSA support** for broader credential coverage.
 - **Extended PACE options** (PIN/PUK/CAN inputs) and richer error-injection scenarios.
 

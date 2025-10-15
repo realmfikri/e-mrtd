@@ -26,6 +26,7 @@ import org.ejbca.cvc.exception.ParseException;
 import org.jmrtd.BACKey;
 import org.jmrtd.PACEKeySpec;
 import org.jmrtd.PassportService;
+import org.jmrtd.cert.CardVerifiableCertificate;
 import org.jmrtd.lds.CardAccessFile;
 import org.jmrtd.lds.ChipAuthenticationInfo;
 import org.jmrtd.lds.ChipAuthenticationPublicKeyInfo;
@@ -43,6 +44,7 @@ import org.jmrtd.lds.iso19794.FaceImageInfo;
 import org.jmrtd.lds.iso19794.FaceInfo;
 import org.jmrtd.protocol.AAResult;
 import org.jmrtd.protocol.EACCAResult;
+import org.jmrtd.protocol.EACTAResult;
 import org.jmrtd.protocol.PACEResult;
 
 import java.io.ByteArrayInputStream;
@@ -55,6 +57,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
+import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -62,6 +65,8 @@ import java.security.SecureRandom;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.AlgorithmParameterSpec;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -72,6 +77,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Base64;
 
 import emu.PersonalizationSupport.SODArtifacts;
 
@@ -107,6 +113,7 @@ public class ReadDG1Main {
     boolean requirePA = false;
     boolean requireAA = false;
     List<Path> taCvcPaths = new ArrayList<>();
+    Path taKeyPath = null;
     String doc = DEFAULT_DOC;
     String dob = DEFAULT_DOB;
     String doe = DEFAULT_DOE;
@@ -174,6 +181,11 @@ public class ReadDG1Main {
       } else if ("--ta-cvc".equals(arg)) {
         i = advanceWithValue(argList, i, "--ta-cvc");
         taCvcPaths.add(Paths.get(argList.get(i)));
+      } else if (arg.startsWith("--ta-key=")) {
+        taKeyPath = Paths.get(arg.substring("--ta-key=".length()));
+      } else if ("--ta-key".equals(arg)) {
+        i = advanceWithValue(argList, i, "--ta-key");
+        taKeyPath = Paths.get(argList.get(i));
       }
     }
 
@@ -266,6 +278,23 @@ public class ReadDG1Main {
 
     List<CvcBundle> taCertificates = loadCvcCertificates(taCvcPaths);
     reportTerminalAuthentication(dg14, taCertificates);
+    TerminalAuthOutcome terminalAuthOutcome = performTerminalAuthentication(
+        svc,
+        paceOutcome,
+        chipAuthOutcome,
+        taCertificates,
+        taKeyPath,
+        doc);
+    System.out.printf(
+        "taCertificatesSupplied=%d, taAttempted=%s, taSucceeded=%s, dg3Readable=%s, dg4Readable=%s%n",
+        terminalAuthOutcome.suppliedCertificates,
+        terminalAuthOutcome.attempted,
+        terminalAuthOutcome.succeeded,
+        terminalAuthOutcome.dg3Readable,
+        terminalAuthOutcome.dg4Readable);
+    if (terminalAuthOutcome.failure != null) {
+      System.out.println("Terminal Authentication failure: " + terminalAuthOutcome.failure.getMessage());
+    }
 
     // baca DG1 (MRZ)
     try (InputStream in = svc.getInputStream(PassportService.EF_DG1)) {
@@ -935,12 +964,143 @@ public class ReadDG1Main {
       try {
         byte[] encoded = Files.readAllBytes(path);
         CVCertificate certificate = CertificateParser.parseCertificate(encoded);
-        bundles.add(new CvcBundle(path, certificate, null));
+        CardVerifiableCertificate cardCertificate = new WrappedCardVerifiableCertificate(certificate);
+        bundles.add(new CvcBundle(path, certificate, cardCertificate, null));
       } catch (IOException | ParseException | ConstructionException e) {
-        bundles.add(new CvcBundle(path, null, e));
+        bundles.add(new CvcBundle(path, null, null, e));
       }
     }
     return bundles;
+  }
+
+  private static TerminalAuthOutcome performTerminalAuthentication(
+      PassportService svc,
+      PaceOutcome paceOutcome,
+      ChipAuthOutcome chipOutcome,
+      List<CvcBundle> cvcBundles,
+      Path taKeyPath,
+      String documentNumber) {
+    TerminalAuthOutcome outcome = new TerminalAuthOutcome();
+    outcome.suppliedCertificates = cvcBundles != null ? cvcBundles.size() : 0;
+
+    if (cvcBundles == null || cvcBundles.isEmpty()) {
+      System.out.println("Terminal Authentication skipped: provide at least one --ta-cvc file.");
+      return outcome;
+    }
+    if (chipOutcome == null || chipOutcome.result == null) {
+      System.out.println("Terminal Authentication skipped: Chip Authentication was not established.");
+      return outcome;
+    }
+    if (taKeyPath == null) {
+      System.out.println("Terminal Authentication skipped: --ta-key not provided.");
+      return outcome;
+    }
+
+    List<CardVerifiableCertificate> certificateChain = new ArrayList<>();
+    for (CvcBundle bundle : cvcBundles) {
+      if (bundle.error != null) {
+        System.out.printf("  %s → cannot use certificate: %s%n",
+            bundle.path,
+            bundle.error.getMessage() != null ? bundle.error.getMessage() : "unknown error");
+        outcome.failure = bundle.error;
+        return outcome;
+      }
+      if (bundle.cardCertificate == null) {
+        System.out.printf("  %s → parsed certificate but could not build CardVerifiableCertificate.%n", bundle.path);
+        outcome.failure = new IllegalStateException("Unable to build CVC certificate wrapper");
+        return outcome;
+      }
+      certificateChain.add(bundle.cardCertificate);
+    }
+
+    PrivateKey terminalKey;
+    try {
+      terminalKey = loadPrivateKey(taKeyPath);
+    } catch (Exception e) {
+      System.out.println("Terminal Authentication skipped: unable to load terminal private key (" + e.getMessage() + ").");
+      outcome.failure = e;
+      return outcome;
+    }
+
+    outcome.attempted = true;
+    try {
+      PACEResult paceResult = paceOutcome != null ? paceOutcome.result : null;
+      EACTAResult taResult;
+      if (paceResult != null) {
+        taResult = svc.doEACTA(null, certificateChain, terminalKey, null, chipOutcome.result, paceResult);
+      } else {
+        taResult = svc.doEACTA(null, certificateChain, terminalKey, null, chipOutcome.result, documentNumber);
+      }
+      outcome.succeeded = taResult != null;
+      if (outcome.succeeded) {
+        System.out.println("Terminal Authentication handshake completed.");
+      } else {
+        System.out.println("Terminal Authentication did not return a success indicator.");
+      }
+    } catch (Exception e) {
+      outcome.failure = e;
+      System.out.println("Terminal Authentication failed: " + e.getMessage());
+    }
+
+    outcome.dg3Readable = attemptDataGroupRead(svc, PassportService.EF_DG3, "DG3");
+    outcome.dg4Readable = attemptDataGroupRead(svc, PassportService.EF_DG4, "DG4");
+    return outcome;
+  }
+
+  private static PrivateKey loadPrivateKey(Path path) throws IOException, GeneralSecurityException {
+    byte[] pemBytes = Files.readAllBytes(path);
+    String pem = new String(pemBytes, StandardCharsets.UTF_8);
+    String sanitized = pem
+        .replace("-----BEGIN PRIVATE KEY-----", "")
+        .replace("-----END PRIVATE KEY-----", "")
+        .replace("-----BEGIN RSA PRIVATE KEY-----", "")
+        .replace("-----END RSA PRIVATE KEY-----", "")
+        .replaceAll("\\s", "");
+    byte[] der;
+    try {
+      der = Base64.getMimeDecoder().decode(sanitized);
+    } catch (IllegalArgumentException e) {
+      throw new GeneralSecurityException("Invalid private key PEM", e);
+    }
+    PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(der);
+    try {
+      return KeyFactory.getInstance("RSA").generatePrivate(spec);
+    } catch (InvalidKeySpecException ignore) {
+      // fall through
+    }
+    try {
+      return KeyFactory.getInstance("EC").generatePrivate(spec);
+    } catch (InvalidKeySpecException ignore) {
+      // fall through
+    }
+    throw new GeneralSecurityException("Unsupported private key algorithm (expected RSA or EC)");
+  }
+
+  private static boolean attemptDataGroupRead(PassportService svc, short fid, String label) {
+    try (InputStream in = svc.getInputStream(fid)) {
+      if (in == null) {
+        System.out.printf("EF.%s not present or zero length.%n", label);
+        return false;
+      }
+      int total = 0;
+      byte[] buffer = new byte[256];
+      int read;
+      while ((read = in.read(buffer)) > 0) {
+        total += read;
+      }
+      System.out.printf("EF.%s readable (%d bytes).%n", label, total);
+      return total > 0;
+    } catch (CardServiceException e) {
+      String message = e.getMessage();
+      if (message == null || message.isBlank()) {
+        message = String.format("SW=%04X", e.getSW());
+      }
+      System.out.printf("EF.%s inaccessible: %s%n", label, message);
+      return false;
+    } catch (IOException e) {
+      System.out.printf("EF.%s read error: %s%n", label, e.getMessage());
+      return false;
+    }
   }
 
   private static void reportTerminalAuthentication(DG14File dg14, List<CvcBundle> cvcBundles) {
@@ -1094,12 +1254,33 @@ public class ReadDG1Main {
   private static final class CvcBundle {
     final Path path;
     final CVCertificate certificate;
+    final CardVerifiableCertificate cardCertificate;
     final Exception error;
 
-    private CvcBundle(Path path, CVCertificate certificate, Exception error) {
+    private CvcBundle(
+        Path path,
+        CVCertificate certificate,
+        CardVerifiableCertificate cardCertificate,
+        Exception error) {
       this.path = path;
       this.certificate = certificate;
+      this.cardCertificate = cardCertificate;
       this.error = error;
+    }
+  }
+
+  private static final class TerminalAuthOutcome {
+    int suppliedCertificates;
+    boolean attempted;
+    boolean succeeded;
+    boolean dg3Readable;
+    boolean dg4Readable;
+    Exception failure;
+  }
+
+  private static final class WrappedCardVerifiableCertificate extends CardVerifiableCertificate {
+    WrappedCardVerifiableCertificate(CVCertificate certificate) throws ConstructionException {
+      super(certificate);
     }
   }
 
