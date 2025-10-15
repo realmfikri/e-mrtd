@@ -36,6 +36,11 @@ import javacard.security.RSAPublicKey;
 import javacard.security.Signature;
 import javacardx.crypto.Cipher;
 
+import java.security.GeneralSecurityException;
+import java.util.Arrays;
+
+import javax.crypto.SecretKey;
+
 public class PassportCrypto {
     public static final byte ENC_MODE = 1;
     public static final byte MAC_MODE = 2;
@@ -60,7 +65,17 @@ public class PassportCrypto {
     KeyAgreement keyAgreement;
     boolean[] eacChangeKeys;
 //    byte[] eacTerminalKeyHash;
-    private static final short EC_X_LENGTH = (short)((short)(KeyBuilder.LENGTH_EC_F2M_163 / 8)+1); 
+    private static final short EC_X_LENGTH = (short)((short)(KeyBuilder.LENGTH_EC_F2M_163 / 8)+1);
+
+    private static final byte CHIP_AUTH_MODE_3DES = 1;
+    private static final byte CHIP_AUTH_MODE_AES = 2;
+
+    private byte chipAuthMode = CHIP_AUTH_MODE_3DES;
+    private String chipAuthCipherAlgorithm = "DESede";
+    private int chipAuthKeyLengthBits = 128;
+    private boolean pendingAesKeys;
+    private byte[] pendingAesMacKey;
+    private byte[] pendingAesEncKey;
 
     public static byte[] PAD_DATA = { (byte) 0x80, 0, 0, 0, 0, 0, 0, 0 };
 
@@ -84,6 +99,50 @@ public class PassportCrypto {
         eacChangeKeys = JCSystem.makeTransientBooleanArray((short) 1,
                 JCSystem.CLEAR_ON_DESELECT);
 
+    }
+
+    public void configureChipAuthentication(String cipherAlgorithm, int keyLengthBits) {
+        if (cipherAlgorithm != null && cipherAlgorithm.startsWith("AES")) {
+            chipAuthMode = CHIP_AUTH_MODE_AES;
+            chipAuthCipherAlgorithm = cipherAlgorithm;
+            chipAuthKeyLengthBits = keyLengthBits;
+        } else {
+            chipAuthMode = CHIP_AUTH_MODE_3DES;
+            chipAuthCipherAlgorithm = "DESede";
+            chipAuthKeyLengthBits = 128;
+        }
+    }
+
+    public boolean hasPendingAesKeys() {
+        return pendingAesKeys;
+    }
+
+    public byte[] getPendingAesMacKey() {
+        return pendingAesMacKey;
+    }
+
+    public byte[] getPendingAesEncKey() {
+        return pendingAesEncKey;
+    }
+
+    public String getChipAuthCipherAlgorithm() {
+        return chipAuthCipherAlgorithm;
+    }
+
+    public int getChipAuthKeyLength() {
+        return chipAuthKeyLengthBits;
+    }
+
+    public void clearPendingAesKeys() {
+        pendingAesKeys = false;
+        if (pendingAesMacKey != null) {
+            Arrays.fill(pendingAesMacKey, (byte) 0x00);
+            pendingAesMacKey = null;
+        }
+        if (pendingAesEncKey != null) {
+            Arrays.fill(pendingAesEncKey, (byte) 0x00);
+            pendingAesEncKey = null;
+        }
     }
 
     public void createMacFinal(byte[] msg, short msg_offset, short msg_len,
@@ -573,6 +632,7 @@ public class PassportCrypto {
      */
     public boolean authenticateChip(byte[] pubData, short offset, short length) {
         try {
+            clearPendingAesKeys();
             // Verify public key first. i.e. see if the data is correct and
             // makes up a valid
             // EC public key.
@@ -587,8 +647,20 @@ public class PassportCrypto {
             short secOffset = (short) (offset + length);
             short secLength = keyAgreement.generateSecret(pubData, offset,
                     length, pubData, secOffset);
-            // use only first 16 bytes?
-            // secLength = 16;
+            if (chipAuthMode == CHIP_AUTH_MODE_AES) {
+                byte[] secret = new byte[secLength];
+                Util.arrayCopyNonAtomic(pubData, secOffset, secret, (short) 0, secLength);
+                SecretKey macKey = org.jmrtd.Util.deriveKey(secret, chipAuthCipherAlgorithm, chipAuthKeyLengthBits,
+                        org.jmrtd.Util.MAC_MODE);
+                SecretKey encKey = org.jmrtd.Util.deriveKey(secret, chipAuthCipherAlgorithm, chipAuthKeyLengthBits,
+                        org.jmrtd.Util.ENC_MODE);
+                pendingAesMacKey = macKey.getEncoded();
+                pendingAesEncKey = encKey.getEncoded();
+                pendingAesKeys = true;
+                Arrays.fill(secret, (byte) 0x00);
+                Util.arrayFillNonAtomic(pubData, secOffset, secLength, (byte) 0x00);
+                return true;
+            }
             short keysOffset = (short) (secOffset + secLength);
             deriveKey(pubData, secOffset, secLength, MAC_MODE, keysOffset);
             short macKeyOffset = keysOffset;
@@ -604,10 +676,15 @@ public class PassportCrypto {
             // just after the current APDU is completely processed.
             eacChangeKeys[0] = true;
             return true;
-        } catch (Exception e) {
+        } catch (GeneralSecurityException e) {
+            pendingAesKeys = false;
             eacChangeKeys[0] = false;
             return false;
-            
+        } catch (Exception e) {
+            pendingAesKeys = false;
+            eacChangeKeys[0] = false;
+            return false;
+
         }
     }
 

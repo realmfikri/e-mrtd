@@ -57,11 +57,13 @@ import javax.crypto.SecretKey;
 import javax.crypto.Mac;
 import javax.crypto.KeyAgreement;
 import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.jmrtd.AccessKeySpec;
 import org.jmrtd.BACKey;
 import org.jmrtd.PACEKeySpec;
 import org.jmrtd.lds.CardAccessFile;
+import org.jmrtd.lds.ChipAuthenticationInfo;
 import org.jmrtd.lds.PACEInfo;
 import org.jmrtd.lds.PACEInfo.MappingType;
 import org.jmrtd.lds.SecurityInfo;
@@ -224,6 +226,10 @@ public class PassportApplet extends Applet implements ISO7816 {
     private final sos.passportapplet.pace.PaceContext paceContext;
 
     private final SecureMessagingAES paceSecureMessaging;
+    private String chipAuthProtocolOid;
+    private BigInteger chipAuthKeyId;
+    private String chipAuthCipherAlgorithm;
+    private int chipAuthKeyLength;
 
     private PACEInfo[] cachedPaceInfos;
 
@@ -575,8 +581,12 @@ public class PassportApplet extends Applet implements ISO7816 {
         if (!hasEACKey() || !hasEACCertificate()) {
             ISOException.throwIt(SW_INS_NOT_SUPPORTED);
         }
-        if (!hasMutuallyAuthenticated() || hasTerminalAuthenticated()) {
+        if ((!hasMutuallyAuthenticated() && !hasPaceEstablished()) || hasTerminalAuthenticated()) {
             ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+        if (p1 == P1_SETFORCOMPUTATION && p2 == P2_AT) {
+            processChipAuthenticationSetAt(buffer, buffer_p, lc);
+            return 0;
         }
         if (p1 == P1_SETFORCOMPUTATION && p2 == P2_KAT) {
 
@@ -613,6 +623,9 @@ public class PassportApplet extends Applet implements ISO7816 {
                 ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
             }
             volatileState[0] |= CHIP_AUTHENTICATED;
+            if (hasPaceEstablished()) {
+                applyChipAuthenticationSecureMessaging();
+            }
             return 0;
         } else if (p1 == P1_SETFORVERIFICATION && (p2 == P2_DST || p2 == P2_AT)) {
             if (!hasChipAuthenticated() || hasTerminalAuthenticated()) {
@@ -708,6 +721,110 @@ public class PassportApplet extends Applet implements ISO7816 {
         }
         System.out.println("PACE MSE set OID=" + oid + " keyRef=" + keyReference);
         System.out.println("  MRZ stored? doc=" + paceDocumentNumber + " dob=" + paceDateOfBirth + " doe=" + paceDateOfExpiry);
+    }
+
+    private void processChipAuthenticationSetAt(byte[] buffer, short offset, short length) {
+        short cursor = offset;
+        short end = (short) (offset + length);
+        String oid = null;
+        BigInteger keyId = null;
+
+        while (cursor < end) {
+            cursor = BERTLVScanner.readTag(buffer, cursor);
+            short tag = BERTLVScanner.tag;
+            cursor = BERTLVScanner.readLength(buffer, cursor);
+            short valueOffset = cursor;
+            short valueLength = BERTLVScanner.valueLength;
+            if ((short) (cursor + valueLength) > end) {
+                ISOException.throwIt(SW_WRONG_LENGTH);
+            }
+            switch (tag) {
+            case (short) 0x80:
+                byte[] oidBytes = new byte[valueLength];
+                Util.arrayCopy(buffer, valueOffset, oidBytes, (short) 0, valueLength);
+                oid = ASN1ObjectIdentifier.fromContents(oidBytes).getId();
+                break;
+            case (short) 0x83:
+            case (short) 0x84:
+                keyId = new BigInteger(1, buffer, valueOffset, valueLength);
+                break;
+            default:
+                break;
+            }
+            cursor = (short) (cursor + valueLength);
+        }
+
+        if (oid == null) {
+            ISOException.throwIt(SW_WRONG_DATA);
+        }
+
+        chipAuthProtocolOid = oid;
+        chipAuthKeyId = keyId;
+
+        String resolvedCipher;
+        int resolvedKeyLength;
+        try {
+            resolvedCipher = ChipAuthenticationInfo.toCipherAlgorithm(oid);
+            resolvedKeyLength = ChipAuthenticationInfo.toKeyLength(oid);
+        } catch (NumberFormatException e) {
+            ISOException.throwIt(SW_WRONG_DATA);
+            return;
+        }
+
+        boolean paceActive = hasPaceEstablished();
+        if (paceActive) {
+            if (resolvedCipher != null && resolvedCipher.startsWith("DESede")) {
+                ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+            }
+            crypto.configureChipAuthentication(resolvedCipher, resolvedKeyLength);
+        } else {
+            if (resolvedCipher != null && resolvedCipher.startsWith("AES")) {
+                System.out.println("CA MSE set AT requested AES but BAC session forces legacy DES secure messaging.");
+            }
+            crypto.configureChipAuthentication(null, 0);
+        }
+
+        chipAuthCipherAlgorithm = crypto.getChipAuthCipherAlgorithm();
+        chipAuthKeyLength = crypto.getChipAuthKeyLength();
+
+        System.out.println("CA MSE set AT oid=" + oid + " cipher=" + chipAuthCipherAlgorithm +
+                " keyLength=" + chipAuthKeyLength + " paceActive=" + paceActive);
+    }
+
+    private void applyChipAuthenticationSecureMessaging() {
+        if (!crypto.hasPendingAesKeys()) {
+            return;
+        }
+
+        byte[] macKeyBytes = crypto.getPendingAesMacKey();
+        byte[] encKeyBytes = crypto.getPendingAesEncKey();
+        if (macKeyBytes == null || encKeyBytes == null) {
+            crypto.clearPendingAesKeys();
+            ISOException.throwIt(SW_INTERNAL_ERROR);
+        }
+
+        String cipherAlgorithm = crypto.getChipAuthCipherAlgorithm();
+        if (cipherAlgorithm == null || !cipherAlgorithm.startsWith("AES")) {
+            crypto.clearPendingAesKeys();
+            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+        }
+
+        SecretKey macKey = new SecretKeySpec(macKeyBytes, cipherAlgorithm);
+        SecretKey encKey = new SecretKeySpec(encKeyBytes, cipherAlgorithm);
+        paceSecureMessaging.setKeys(macKey, encKey);
+        paceContext.setSessionMacKey(macKey);
+        paceContext.setSessionEncKey(encKey);
+        paceContext.setCipherAlgorithm(cipherAlgorithm);
+        paceContext.setKeyLength(crypto.getChipAuthKeyLength());
+        if (paceSSC != null) {
+            Arrays.fill(paceSSC, (byte) 0);
+        }
+        if (paceExpectedSSC != null) {
+            Arrays.fill(paceExpectedSSC, (byte) 0);
+        }
+        paceContext.setPaceSendSequenceCounter(paceSSC);
+        crypto.clearPendingAesKeys();
+        System.out.println("Chip Authentication secure messaging upgraded to " + cipherAlgorithm);
     }
 
     private PACEInfo selectPaceInfo(String oid, BigInteger keyId) {
