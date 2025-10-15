@@ -1151,9 +1151,9 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         byte[] buffer = apdu.getBuffer();
         short bytesLeft = (short) (buffer[OFFSET_LC] & 0x00FF);
-
-        if (bytesLeft != m2_len)
+        if (bytesLeft != m2_len) {
             ISOException.throwIt(SW_WRONG_LENGTH);
+        }
 
         // put m2 in place
         Util.arrayCopyNonAtomic(buffer, buffer_p, buffer, m2_offset, m2_len);

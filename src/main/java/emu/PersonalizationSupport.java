@@ -70,12 +70,15 @@ final class PersonalizationSupport {
                                      int imageHeight,
                                      boolean corruptDG2)
       throws GeneralSecurityException, OperatorCreationException, CertIOException, IOException {
-    KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
-    kpg.initialize(2048);
     SecureRandom random = new SecureRandom();
 
-    KeyPair cscaPair = kpg.generateKeyPair();
-    KeyPair docSignerPair = kpg.generateKeyPair();
+    KeyPairGenerator cscaGenerator = KeyPairGenerator.getInstance("RSA");
+    cscaGenerator.initialize(2048, random);
+    KeyPair cscaPair = cscaGenerator.generateKeyPair();
+
+    KeyPairGenerator docSignerGenerator = KeyPairGenerator.getInstance("RSA");
+    docSignerGenerator.initialize(1024, random);
+    KeyPair docSignerPair = docSignerGenerator.generateKeyPair();
     KeyPairGenerator ecGenerator = KeyPairGenerator.getInstance("EC");
     ecGenerator.initialize(new ECGenParameterSpec("secp256r1"));
     KeyPair chipAuthKeyPair = ecGenerator.generateKeyPair();
@@ -158,7 +161,16 @@ final class PersonalizationSupport {
     SODFile sodFile = new SODFile("SHA-256", SIGNATURE_ALGORITHM, hashes, docSignerPair.getPrivate(), docSignerCert);
     byte[] sodBytes = sodFile.getEncoded();
 
-    return new SODArtifacts(sodBytes, dg2Bytes, dg15Bytes, dg14Bytes, cardAccessBytes, chipAuthKeyPair, cscaCert, docSignerCert);
+    return new SODArtifacts(
+        sodBytes,
+        dg2Bytes,
+        dg15Bytes,
+        dg14Bytes,
+        cardAccessBytes,
+        chipAuthKeyPair,
+        docSignerPair,
+        cscaCert,
+        docSignerCert);
   }
 
   private static X509Certificate createCertificate(String subject,
@@ -263,6 +275,7 @@ final class PersonalizationSupport {
     final byte[] dg14Bytes;
     final byte[] cardAccessBytes;
     final KeyPair chipAuthKeyPair;
+    final KeyPair docSignerKeyPair;
     final X509Certificate cscaCert;
     final X509Certificate docSignerCert;
 
@@ -272,6 +285,7 @@ final class PersonalizationSupport {
                  byte[] dg14Bytes,
                  byte[] cardAccessBytes,
                  KeyPair chipAuthKeyPair,
+                 KeyPair docSignerKeyPair,
                  X509Certificate cscaCert,
                  X509Certificate docSignerCert) {
       this.sodBytes = sodBytes;
@@ -280,6 +294,7 @@ final class PersonalizationSupport {
       this.dg14Bytes = dg14Bytes;
       this.cardAccessBytes = cardAccessBytes;
       this.chipAuthKeyPair = chipAuthKeyPair;
+      this.docSignerKeyPair = docSignerKeyPair;
       this.cscaCert = cscaCert;
       this.docSignerCert = docSignerCert;
     }

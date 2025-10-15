@@ -4,10 +4,13 @@ import com.licel.jcardsim.smartcardio.CardSimulator;
 import com.licel.jcardsim.smartcardio.CardTerminalSimulator;
 import javacard.framework.AID;
 
+import javax.crypto.Cipher;
 import javax.smartcardio.*;
 
 import net.sf.scuba.data.Gender;
 import net.sf.scuba.smartcards.CardService;
+import net.sf.scuba.smartcards.CardServiceException;
+import net.sf.scuba.smartcards.ISO7816;
 import net.sf.scuba.smartcards.TerminalCardService;
 import org.ejbca.cvc.AccessRightEnum;
 import org.ejbca.cvc.AuthorizationField;
@@ -33,10 +36,12 @@ import org.jmrtd.lds.TerminalAuthenticationInfo;
 import org.jmrtd.lds.icao.COMFile;
 import org.jmrtd.lds.icao.DG1File;
 import org.jmrtd.lds.icao.DG14File;
+import org.jmrtd.lds.icao.DG15File;
 import org.jmrtd.lds.icao.DG2File;
 import org.jmrtd.lds.icao.MRZInfo;
 import org.jmrtd.lds.iso19794.FaceImageInfo;
 import org.jmrtd.lds.iso19794.FaceInfo;
+import org.jmrtd.protocol.AAResult;
 import org.jmrtd.protocol.EACCAResult;
 import org.jmrtd.protocol.PACEResult;
 
@@ -49,6 +54,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
 import java.security.spec.AlgorithmParameterSpec;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -82,6 +94,9 @@ public class ReadDG1Main {
   private static final byte KEY_REF_PIN = 0x03;
   private static final byte KEY_REF_PUK = 0x04;
 
+  private static final int AA_CHALLENGE_LENGTH = 8;
+  private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
   public static void main(String[] args) throws Exception {
     boolean seed = false;
     boolean corruptDG2 = false;
@@ -90,6 +105,7 @@ public class ReadDG1Main {
     Path trustStorePath = null;
     String trustStorePassword = null;
     boolean requirePA = false;
+    boolean requireAA = false;
     List<Path> taCvcPaths = new ArrayList<>();
     String doc = DEFAULT_DOC;
     String dob = DEFAULT_DOB;
@@ -117,6 +133,8 @@ public class ReadDG1Main {
         trustStorePassword = argList.get(i);
       } else if ("--require-pa".equals(arg)) {
         requirePA = true;
+      } else if ("--require-aa".equals(arg)) {
+        requireAA = true;
       } else if ("--corrupt-dg2".equals(arg)) {
         corruptDG2 = true;
       } else if ("--large-dg2".equals(arg)) {
@@ -239,6 +257,13 @@ public class ReadDG1Main {
     ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(svc, dg14);
     System.out.printf("caEstablished=%s%n", chipAuthOutcome.established);
 
+    DG15File dg15 = readDG15(svc);
+    ActiveAuthOutcome activeAuthOutcome = performActiveAuthentication(loggingService, svc, dg15, requireAA);
+    System.out.printf("aaAvailable=%s, aaVerified=%s%n", activeAuthOutcome.available, activeAuthOutcome.verified);
+    if (requireAA && !activeAuthOutcome.verified) {
+      throw new RuntimeException("Active Authentication failed but was required");
+    }
+
     List<CvcBundle> taCertificates = loadCvcCertificates(taCvcPaths);
     reportTerminalAuthentication(dg14, taCertificates);
 
@@ -337,6 +362,10 @@ public class ReadDG1Main {
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
     writeBinary(ch, artifacts.sodBytes, "WRITE EF.SOD");
 
+    if (artifacts.docSignerKeyPair != null && artifacts.docSignerKeyPair.getPrivate() != null) {
+      seedActiveAuthenticationKey(ch, artifacts.docSignerKeyPair.getPrivate());
+    }
+
     Path trustDir = Paths.get("target", "trust-store");
     Files.createDirectories(trustDir);
     try (var stream = Files.list(trustDir)) {
@@ -372,6 +401,51 @@ public class ReadDG1Main {
       System.out.println("Failed to parse EF.CardAccess: " + e.getMessage());
       return List.of();
     }
+  }
+
+  private static void seedActiveAuthenticationKey(CardChannel ch, PrivateKey privateKey) throws Exception {
+    if (!(privateKey instanceof RSAPrivateKey)) {
+      System.out.println("Skipping AA key seed: private key is not RSA.");
+      return;
+    }
+    RSAPrivateKey rsaKey = (RSAPrivateKey) privateKey;
+    byte[] modulus = stripLeadingZero(rsaKey.getModulus().toByteArray());
+    byte[] exponent = stripLeadingZero(rsaKey.getPrivateExponent().toByteArray());
+
+    byte[] modulusTlv = buildRsaPrivateKeyTlv(0x60, modulus);
+    int sw = putData(ch, 0x00, 0x60, modulusTlv, "PUT AA modulus TLV");
+    if (sw != 0x9000) {
+      throw new RuntimeException(String.format("Failed to seed AA modulus (SW=%04X)", sw));
+    }
+
+    byte[] exponentTlv = buildRsaPrivateKeyTlv(0x61, exponent);
+    sw = putData(ch, 0x00, 0x61, exponentTlv, "PUT AA exponent TLV");
+    if (sw != 0x9000) {
+      throw new RuntimeException(String.format("Failed to seed AA exponent (SW=%04X)", sw));
+    }
+  }
+
+  private static byte[] buildRsaPrivateKeyTlv(int containerTag, byte[] keyBytes) {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    writeTag(out, containerTag);
+    // The applet expects the outer container length to be zero and treats the nested
+    // OCTET STRING as a sibling TLV (legacy PUT DATA layout).
+    writeLength(out, 0);
+    writeTag(out, 0x04);
+    writeLength(out, keyBytes.length);
+    out.write(keyBytes, 0, keyBytes.length);
+    return out.toByteArray();
+  }
+
+  private static byte[] stripLeadingZero(byte[] input) {
+    if (input.length <= 1 || input[0] != 0x00) {
+      return input;
+    }
+    int index = 0;
+    while (index < input.length - 1 && input[index] == 0x00) {
+      index++;
+    }
+    return Arrays.copyOfRange(input, index, input.length);
   }
 
   private static byte[] readEfPlain(CardChannel ch, short fid) {
@@ -583,6 +657,20 @@ public class ReadDG1Main {
     }
   }
 
+  private static DG15File readDG15(PassportService svc) {
+    byte[] dg15Bytes = readEf(svc, PassportService.EF_DG15);
+    if (dg15Bytes == null || dg15Bytes.length == 0) {
+      System.out.println("DG15 not present or unreadable.");
+      return null;
+    }
+    try (ByteArrayInputStream in = new ByteArrayInputStream(dg15Bytes)) {
+      return new DG15File(in);
+    } catch (IOException e) {
+      System.out.println("DG15 parse failed: " + e.getMessage());
+      return null;
+    }
+  }
+
   private static ChipAuthOutcome performChipAuthenticationIfSupported(PassportService svc, DG14File dg14) {
     ChipAuthOutcome outcome = new ChipAuthOutcome();
     if (dg14 == null) {
@@ -662,6 +750,162 @@ public class ReadDG1Main {
       System.out.println("Chip Authentication failed: " + e.getMessage());
     }
     return outcome;
+  }
+
+  private static ActiveAuthOutcome performActiveAuthentication(
+      CardService rawService,
+      PassportService svc,
+      DG15File dg15,
+      boolean requireAA) {
+    ActiveAuthOutcome outcome = new ActiveAuthOutcome();
+    if (dg15 == null) {
+      System.out.println("Active Authentication skipped: DG15 not present.");
+      return outcome;
+    }
+    outcome.available = true;
+    outcome.publicKey = dg15.getPublicKey();
+    if (outcome.publicKey == null) {
+      System.out.println("Active Authentication skipped: DG15 does not contain a public key.");
+      return outcome;
+    }
+
+    byte[] challenge = new byte[AA_CHALLENGE_LENGTH];
+    SECURE_RANDOM.nextBytes(challenge);
+    outcome.challenge = challenge.clone();
+    int expectedResponseLength = expectedAaResponseLength(outcome.publicKey);
+    try {
+      String digestAlgorithm = resolveAADigestAlgorithm(outcome.publicKey);
+      String signatureAlgorithm = resolveAASignatureAlgorithm(outcome.publicKey);
+      AAResult result = svc.doAA(outcome.publicKey, digestAlgorithm, signatureAlgorithm, challenge);
+      outcome.attempted = result != null;
+      if (result != null) {
+        outcome.response = result.getResponse();
+        if (shouldRetryPlainActiveAuth(outcome.response, expectedResponseLength)) {
+          System.out.println(
+              "Active Authentication response missing under secure messaging, retrying without protection.");
+          outcome.response = tryPlainInternalAuthenticate(rawService, challenge);
+        }
+        try {
+          outcome.verified = verifyActiveAuthenticationSignature(outcome.publicKey, challenge, outcome.response);
+        } catch (GeneralSecurityException e) {
+          outcome.failure = e;
+          System.out.println("Active Authentication verification error: " + e.getMessage());
+        }
+      }
+
+      if (outcome.verified) {
+        int keyLength = resolveKeyLength(outcome.publicKey);
+        if (keyLength > 0) {
+          System.out.printf("Active Authentication verified (%s %d-bit).%n",
+              outcome.publicKey.getAlgorithm(), keyLength);
+        } else {
+          System.out.printf("Active Authentication verified (%s).%n",
+              outcome.publicKey.getAlgorithm());
+        }
+      } else if (requireAA) {
+        System.out.println("Active Authentication verification failed.");
+      } else {
+        System.out.println("Active Authentication attempt did not verify signature.");
+      }
+    } catch (Exception e) {
+      outcome.failure = e;
+      System.out.println("Active Authentication failed: " + e.getMessage());
+    } finally {
+      Arrays.fill(challenge, (byte) 0x00);
+    }
+    return outcome;
+  }
+
+  private static byte[] tryPlainInternalAuthenticate(CardService rawService, byte[] challenge)
+      throws CardServiceException {
+    net.sf.scuba.smartcards.CommandAPDU command = new net.sf.scuba.smartcards.CommandAPDU(
+        ISO7816.CLA_ISO7816,
+        ISO7816.INS_INTERNAL_AUTHENTICATE,
+        0x00,
+        0x00,
+        challenge,
+        256);
+    net.sf.scuba.smartcards.ResponseAPDU response = rawService.transmit(command);
+    int sw = response.getSW();
+    if (sw != ISO7816.SW_NO_ERROR) {
+      throw new CardServiceException("INTERNAL AUTHENTICATE failed", (short) sw);
+    }
+    return response.getData();
+  }
+
+  private static boolean shouldRetryPlainActiveAuth(byte[] response, int expectedResponseLength) {
+    if (response == null || response.length == 0) {
+      return true;
+    }
+    return expectedResponseLength > 0 && response.length != expectedResponseLength;
+  }
+
+  private static int resolveKeyLength(PublicKey key) {
+    if (key instanceof RSAPublicKey) {
+      return ((RSAPublicKey) key).getModulus().bitLength();
+    }
+    return -1;
+  }
+
+  private static int expectedAaResponseLength(PublicKey key) {
+    int keyBits = resolveKeyLength(key);
+    return keyBits > 0 ? keyBits / Byte.SIZE : -1;
+  }
+
+  private static String resolveAADigestAlgorithm(PublicKey key) {
+    if (key == null) {
+      return null;
+    }
+    if ("RSA".equalsIgnoreCase(key.getAlgorithm())) {
+      return "SHA-1";
+    }
+    return null;
+  }
+
+  private static String resolveAASignatureAlgorithm(PublicKey key) {
+    if (key == null) {
+      return null;
+    }
+    if ("RSA".equalsIgnoreCase(key.getAlgorithm())) {
+      return "SHA1withRSA";
+    }
+    return key.getAlgorithm();
+  }
+
+  private static boolean verifyActiveAuthenticationSignature(
+      PublicKey key, byte[] challenge, byte[] response) throws GeneralSecurityException {
+    if (!(key instanceof RSAPublicKey)) {
+      throw new GeneralSecurityException("Unsupported AA key algorithm: " + key.getAlgorithm());
+    }
+    if (response == null || response.length == 0) {
+      return false;
+    }
+
+    Cipher cipher = Cipher.getInstance("RSA/ECB/NoPadding");
+    cipher.init(Cipher.DECRYPT_MODE, key);
+    byte[] plain = cipher.doFinal(response);
+    if (plain.length < 1 + 20 + 1) {
+      return false;
+    }
+
+    if ((plain[0] & 0xFF) != 0x6A || (plain[plain.length - 1] & 0xFF) != 0xBC) {
+      return false;
+    }
+
+    int digestLength = 20;
+    int digestOffset = plain.length - 1 - digestLength;
+    if (digestOffset <= 1) {
+      return false;
+    }
+    int m1Offset = 1;
+    int m1Length = digestOffset - m1Offset;
+
+    MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
+    sha1.update(plain, m1Offset, m1Length);
+    sha1.update(challenge);
+    byte[] expectedDigest = sha1.digest();
+    byte[] actualDigest = Arrays.copyOfRange(plain, digestOffset, digestOffset + digestLength);
+    return MessageDigest.isEqual(expectedDigest, actualDigest);
   }
 
   private static ChipAuthenticationInfo selectPreferredChipAuth(List<ChipAuthenticationInfo> chipInfos) {
@@ -834,6 +1078,16 @@ public class ReadDG1Main {
     ChipAuthenticationInfo selectedInfo;
     ChipAuthenticationPublicKeyInfo publicKeyInfo;
     EACCAResult result;
+    Exception failure;
+  }
+
+  private static final class ActiveAuthOutcome {
+    boolean available;
+    boolean attempted;
+    boolean verified;
+    PublicKey publicKey;
+    byte[] challenge;
+    byte[] response;
     Exception failure;
   }
 
