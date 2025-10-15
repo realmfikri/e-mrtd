@@ -20,9 +20,16 @@ import org.jmrtd.lds.SODFile;
 import org.jmrtd.lds.TerminalAuthenticationInfo;
 import org.jmrtd.lds.icao.DG15File;
 import org.jmrtd.lds.icao.DG14File;
+import org.jmrtd.lds.icao.DG3File;
+import org.jmrtd.lds.icao.DG4File;
 import org.jmrtd.lds.icao.DG2File;
 import org.jmrtd.lds.iso19794.FaceImageInfo;
 import org.jmrtd.lds.iso19794.FaceInfo;
+import org.jmrtd.lds.iso19794.FingerImageInfo;
+import org.jmrtd.lds.iso19794.FingerInfo;
+import org.jmrtd.lds.iso19794.IrisBiometricSubtypeInfo;
+import org.jmrtd.lds.iso19794.IrisImageInfo;
+import org.jmrtd.lds.iso19794.IrisInfo;
 
 import javax.imageio.ImageIO;
 import java.awt.BasicStroke;
@@ -147,6 +154,9 @@ final class PersonalizationSupport {
     DG14File dg14File = new DG14File(dg14Infos);
     byte[] dg14Bytes = dg14File.getEncoded();
 
+    byte[] dg3Bytes = buildDemoDG3();
+    byte[] dg4Bytes = buildDemoDG4();
+
     if (corruptDG2) {
       dg2Bytes = corrupt(dg2Bytes);
     }
@@ -155,6 +165,8 @@ final class PersonalizationSupport {
     MessageDigest md = MessageDigest.getInstance("SHA-256");
     hashes.put(Integer.valueOf(1), md.digest(dg1Bytes));
     hashes.put(Integer.valueOf(2), md.digest(dg2Bytes));
+    hashes.put(Integer.valueOf(3), md.digest(dg3Bytes));
+    hashes.put(Integer.valueOf(4), md.digest(dg4Bytes));
     hashes.put(Integer.valueOf(14), md.digest(dg14Bytes));
     hashes.put(Integer.valueOf(15), md.digest(dg15Bytes));
 
@@ -164,6 +176,8 @@ final class PersonalizationSupport {
     return new SODArtifacts(
         sodBytes,
         dg2Bytes,
+        dg3Bytes,
+        dg4Bytes,
         dg15Bytes,
         dg14Bytes,
         cardAccessBytes,
@@ -171,6 +185,118 @@ final class PersonalizationSupport {
         docSignerPair,
         cscaCert,
         docSignerCert);
+  }
+
+  private static byte[] buildDemoDG3() throws IOException {
+    int width = 160;
+    int height = 160;
+    byte[] fingerprintPixels = createFingerprintPixels(width, height);
+
+    FingerImageInfo fingerImage = new FingerImageInfo(
+        FingerImageInfo.POSITION_RIGHT_INDEX_FINGER,
+        1,
+        1,
+        80,
+        FingerImageInfo.IMPRESSION_TYPE_LIVE_SCAN_PLAIN,
+        width,
+        height,
+        new ByteArrayInputStream(fingerprintPixels),
+        fingerprintPixels.length,
+        FingerInfo.COMPRESSION_UNCOMPRESSED_NO_BIT_PACKING);
+
+    FingerInfo fingerInfo = new FingerInfo(
+        1,
+        31,
+        FingerInfo.SCALE_UNITS_PPI,
+        500,
+        500,
+        500,
+        500,
+        8,
+        FingerInfo.COMPRESSION_UNCOMPRESSED_NO_BIT_PACKING,
+        Collections.singletonList(fingerImage));
+
+    DG3File dg3File = new DG3File(Collections.singletonList(fingerInfo));
+    return dg3File.getEncoded();
+  }
+
+  private static byte[] buildDemoDG4() throws IOException {
+    int width = 160;
+    int height = 160;
+    byte[] irisPixels = createIrisPixels(width, height);
+
+    IrisImageInfo irisImage = new IrisImageInfo(
+        1,
+        IrisImageInfo.IMAGE_QUAL_MED_HI,
+        0,
+        0,
+        width,
+        height,
+        new ByteArrayInputStream(irisPixels),
+        irisPixels.length,
+        IrisInfo.IMAGEFORMAT_MONO_RAW);
+
+    IrisBiometricSubtypeInfo subtype = new IrisBiometricSubtypeInfo(
+        IrisBiometricSubtypeInfo.EYE_RIGHT,
+        IrisInfo.IMAGEFORMAT_MONO_RAW,
+        Collections.singletonList(irisImage));
+
+    byte[] deviceId = new byte[16];
+    for (int i = 0; i < deviceId.length; i++) {
+      deviceId[i] = (byte) (0xA0 + i);
+    }
+
+    IrisInfo irisInfo = new IrisInfo(
+        1,
+        IrisInfo.ORIENTATION_BASE,
+        IrisInfo.ORIENTATION_BASE,
+        IrisInfo.SCAN_TYPE_PROGRESSIVE,
+        IrisInfo.IROCC_PROCESSED,
+        IrisInfo.IROC_UNITFILL,
+        IrisInfo.IRBNDY_PROCESSED,
+        220,
+        IrisInfo.IMAGEFORMAT_MONO_RAW,
+        width,
+        height,
+        8,
+        IrisInfo.TRANS_STD,
+        deviceId,
+        Collections.singletonList(subtype));
+
+    DG4File dg4File = new DG4File(Collections.singletonList(irisInfo));
+    return dg4File.getEncoded();
+  }
+
+  private static byte[] createFingerprintPixels(int width, int height) {
+    byte[] pixels = new byte[width * height];
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        int index = y * width + x;
+        int ridge = (int) ((Math.sin((x + y) / 12.0) + 1.0) * 120.0);
+        int swirl = (int) ((Math.cos((x - y) / 18.0) + 1.0) * 60.0);
+        int value = Math.min(255, ridge + swirl);
+        pixels[index] = (byte) value;
+      }
+    }
+    return pixels;
+  }
+
+  private static byte[] createIrisPixels(int width, int height) {
+    byte[] pixels = new byte[width * height];
+    double centerX = width / 2.0;
+    double centerY = height / 2.0;
+    double maxRadius = Math.min(width, height) / 2.0;
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        double dx = x - centerX;
+        double dy = y - centerY;
+        double distance = Math.sqrt(dx * dx + dy * dy);
+        double normalized = Math.min(1.0, distance / maxRadius);
+        int value = (int) (200 - 140 * normalized + 30 * Math.sin(distance / 4.0));
+        pixels[y * width + x] = (byte) Math.max(0, Math.min(255, value));
+      }
+    }
+    return pixels;
   }
 
   private static X509Certificate createCertificate(String subject,
@@ -271,6 +397,8 @@ final class PersonalizationSupport {
   static final class SODArtifacts {
     final byte[] sodBytes;
     final byte[] dg2Bytes;
+    final byte[] dg3Bytes;
+    final byte[] dg4Bytes;
     final byte[] dg15Bytes;
     final byte[] dg14Bytes;
     final byte[] cardAccessBytes;
@@ -281,6 +409,8 @@ final class PersonalizationSupport {
 
     SODArtifacts(byte[] sodBytes,
                  byte[] dg2Bytes,
+                 byte[] dg3Bytes,
+                 byte[] dg4Bytes,
                  byte[] dg15Bytes,
                  byte[] dg14Bytes,
                  byte[] cardAccessBytes,
@@ -290,6 +420,8 @@ final class PersonalizationSupport {
                  X509Certificate docSignerCert) {
       this.sodBytes = sodBytes;
       this.dg2Bytes = dg2Bytes;
+      this.dg3Bytes = dg3Bytes;
+      this.dg4Bytes = dg4Bytes;
       this.dg15Bytes = dg15Bytes;
       this.dg14Bytes = dg14Bytes;
       this.cardAccessBytes = cardAccessBytes;

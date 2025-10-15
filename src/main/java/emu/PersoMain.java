@@ -28,6 +28,8 @@ public class PersoMain {
   private static final short EF_COM = (short)0x011E;
   private static final short EF_DG1 = (short)0x0101;
   private static final short EF_DG2 = (short)0x0102;
+  private static final short EF_DG3 = (short)0x0103;
+  private static final short EF_DG4 = (short)0x0104;
   private static final short EF_DG14 = PassportService.EF_DG14;
   private static final short EF_DG15 = (short)0x010F;
   private static final short EF_SOD = (short)0x011D;
@@ -57,7 +59,14 @@ public class PersoMain {
 
     // 3) Siapkan payload LDS (COM + DG1) dengan JMRTD
     // COM berisi daftar DG yang hadir. Di sini minimalis: hanya DG1.
-    int[] tagList = new int[]{LDSFile.EF_DG1_TAG, LDSFile.EF_DG2_TAG, LDSFile.EF_DG14_TAG, LDSFile.EF_DG15_TAG};
+    int[] tagList = new int[]{
+        LDSFile.EF_DG1_TAG,
+        LDSFile.EF_DG2_TAG,
+        LDSFile.EF_DG3_TAG,
+        LDSFile.EF_DG4_TAG,
+        LDSFile.EF_DG14_TAG,
+        LDSFile.EF_DG15_TAG
+    };
     COMFile com = new COMFile("1.7", "4.0.0", tagList); // versi umum; cukup untuk uji
     byte[] comBytes = com.getEncoded();
 
@@ -82,6 +91,9 @@ public class PersoMain {
     int faceWidth = largeDG2 ? 720 : 480;
     int faceHeight = largeDG2 ? 960 : 600;
     SODArtifacts sodArtifacts = PersonalizationSupport.buildArtifacts(dg1Bytes, faceWidth, faceHeight, corruptDG2);
+    System.out.printf("Synthetic biometrics → DG3=%d bytes, DG4=%d bytes.%n",
+        sodArtifacts.dg3Bytes != null ? sodArtifacts.dg3Bytes.length : 0,
+        sodArtifacts.dg4Bytes != null ? sodArtifacts.dg4Bytes.length : 0);
 
     if (sodArtifacts.cardAccessBytes != null && sodArtifacts.cardAccessBytes.length > 0) {
       createEF(ch, EF_CARD_ACCESS, sodArtifacts.cardAccessBytes.length, "CREATE EF.CardAccess");
@@ -92,6 +104,18 @@ public class PersoMain {
     createEF(ch, EF_DG2, sodArtifacts.dg2Bytes.length, "CREATE EF.DG2");
     selectEF(ch, EF_DG2, "SELECT EF.DG2 before WRITE");
     writeBinary(ch, sodArtifacts.dg2Bytes, "WRITE EF.DG2");
+
+    if (sodArtifacts.dg3Bytes != null && sodArtifacts.dg3Bytes.length > 0) {
+      createEF(ch, EF_DG3, sodArtifacts.dg3Bytes.length, "CREATE EF.DG3");
+      selectEF(ch, EF_DG3, "SELECT EF.DG3 before WRITE");
+      writeBinary(ch, sodArtifacts.dg3Bytes, "WRITE EF.DG3");
+    }
+
+    if (sodArtifacts.dg4Bytes != null && sodArtifacts.dg4Bytes.length > 0) {
+      createEF(ch, EF_DG4, sodArtifacts.dg4Bytes.length, "CREATE EF.DG4");
+      selectEF(ch, EF_DG4, "SELECT EF.DG4 before WRITE");
+      writeBinary(ch, sodArtifacts.dg4Bytes, "WRITE EF.DG4");
+    }
 
     if (sodArtifacts.dg14Bytes != null && sodArtifacts.dg14Bytes.length > 0) {
       createEF(ch, EF_DG14, sodArtifacts.dg14Bytes.length, "CREATE EF.DG14");

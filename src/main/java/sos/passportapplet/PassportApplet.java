@@ -1396,7 +1396,7 @@ public class PassportApplet extends Applet implements ISO7816 {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
 
-        if (fileSystem.getFile(fid) != null) {
+        if (fileSystem.exists(fid)) {
             selectedFile = fid;
             volatileState[0] |= FILE_SELECTED;
             return;

@@ -126,7 +126,7 @@ public class FileSystem {
     }
 
     public void createFile(short fid, short size, CVCertificate certObject) {
-        short idx = getFileIndex(fid);
+        short idx = getFileIndex(fid, false);
 
         // first create determines maximum file size
         if (files[idx] == null)
@@ -144,8 +144,9 @@ public class FileSystem {
 
     public void writeData(short fid, short file_offset, byte[] data,
             short data_offset, short length) {
-        byte[] file = getFile(fid);
-        short fileSize = getFileSize(fid);
+        short idx = getFileIndex(fid, false);
+        byte[] file = (byte[]) files[idx];
+        short fileSize = fileSizes[idx];
 
         if (file == null) {
             ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
@@ -154,19 +155,32 @@ public class FileSystem {
         if (fileSize < (short) (file_offset + length))
             ISOException.throwIt(ISO7816.SW_FILE_FULL);
 
-        Util.arrayCopy(data, data_offset, getFile(fid), file_offset, length);
+        Util.arrayCopy(data, data_offset, file, file_offset, length);
     }
 
     public byte[] getFile(short fid) {
-        short idx = getFileIndex(fid);
+        short idx = getFileIndex(fid, true);
         if (idx == -1) {
             return null;
         }
         return (byte[]) files[idx];
     }
 
+    public boolean exists(short fid) {
+        short idx;
+        try {
+            idx = getFileIndex(fid, false);
+        } catch (ISOException e) {
+            return false;
+        }
+        if (idx == -1) {
+            return false;
+        }
+        return files[idx] != null;
+    }
+
     public short getFileSize(short fid) {
-        short idx = getFileIndex(fid);
+        short idx = getFileIndex(fid, true);
         if (idx == -1) {
             return -1;
         }
@@ -174,9 +188,14 @@ public class FileSystem {
     }
 
     private static short getFileIndex(short fid) throws ISOException {
-        if ((fid == EF_DG3_FID && !PassportApplet.certificate.isDG3Accessible())
-                || (fid == EF_DG4_FID && !PassportApplet.certificate
-                        .isDG4Accessible())) {
+        return getFileIndex(fid, true);
+    }
+
+    private static short getFileIndex(short fid, boolean enforceAccessControl) throws ISOException {
+        if (enforceAccessControl
+                && ((fid == EF_DG3_FID && !PassportApplet.certificate.isDG3Accessible())
+                        || (fid == EF_DG4_FID && !PassportApplet.certificate
+                                .isDG4Accessible()))) {
             ISOException
                     .throwIt(PassportApplet.SW_SECURITY_STATUS_NOT_SATISFIED);
         }

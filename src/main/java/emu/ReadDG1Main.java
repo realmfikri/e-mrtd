@@ -86,6 +86,8 @@ public class ReadDG1Main {
   private static final short EF_COM = (short)0x011E;
   private static final short EF_DG1 = (short)0x0101;
   private static final short EF_DG2 = (short)0x0102;
+  private static final short EF_DG3 = (short)0x0103;
+  private static final short EF_DG4 = (short)0x0104;
   private static final short EF_DG14 = PassportService.EF_DG14;
   private static final short EF_DG15 = (short)0x010F;
   private static final short EF_SOD = (short)0x011D;
@@ -108,7 +110,6 @@ public class ReadDG1Main {
     boolean corruptDG2 = false;
     boolean largeDG2 = false;
     boolean attemptPace = false;
-    boolean paceCam = false;
     Path trustStorePath = null;
     String trustStorePassword = null;
     boolean requirePA = false;
@@ -129,8 +130,6 @@ public class ReadDG1Main {
         seed = true;
       } else if ("--attempt-pace".equals(arg)) {
         attemptPace = true;
-      } else if ("--pace-cam".equals(arg)) {
-        paceCam = true;
       } else if (arg.startsWith("--trust-store=")) {
         trustStorePath = Paths.get(arg.substring("--trust-store=".length()));
       } else if ("--trust-store".equals(arg)) {
@@ -165,20 +164,20 @@ public class ReadDG1Main {
         i = advanceWithValue(argList, i, "--doe");
         doe = argList.get(i);
       } else if (arg.startsWith("--can=")) {
-        can = normalizeSecret(arg.substring("--can=".length()));
+        can = arg.substring("--can=".length());
       } else if ("--can".equals(arg)) {
         i = advanceWithValue(argList, i, "--can");
-        can = normalizeSecret(argList.get(i));
+        can = argList.get(i);
       } else if (arg.startsWith("--pin=")) {
-        pin = normalizeSecret(arg.substring("--pin=".length()));
+        pin = arg.substring("--pin=".length());
       } else if ("--pin".equals(arg)) {
         i = advanceWithValue(argList, i, "--pin");
-        pin = normalizeSecret(argList.get(i));
+        pin = argList.get(i);
       } else if (arg.startsWith("--puk=")) {
-        puk = normalizeSecret(arg.substring("--puk=".length()));
+        puk = arg.substring("--puk=".length());
       } else if ("--puk".equals(arg)) {
         i = advanceWithValue(argList, i, "--puk");
-        puk = normalizeSecret(argList.get(i));
+        puk = argList.get(i);
       } else if (arg.startsWith("--ta-cvc=")) {
         taCvcPaths.add(Paths.get(arg.substring("--ta-cvc=".length())));
       } else if ("--ta-cvc".equals(arg)) {
@@ -261,11 +260,7 @@ public class ReadDG1Main {
       svc.doBAC(bacKey);
     }
 
-    System.out.printf(
-        "paceAttempted=%s, paceEstablished=%s, paceCamRequested=%s%n",
-        paceOutcome.attempted,
-        paceOutcome.established,
-        paceCam);
+    System.out.printf("paceAttempted=%s, paceEstablished=%s%n", paceOutcome.attempted, paceOutcome.established);
     byte[] cardAccessPostAuth = readEf(svc, PassportService.EF_CARD_ACCESS);
     if (cardAccessPostAuth != null && (rawCardAccess == null || rawCardAccess.length == 0)) {
       System.out.printf("EF.CardAccess (post-auth) length=%d bytes%n", cardAccessPostAuth.length);
@@ -274,24 +269,6 @@ public class ReadDG1Main {
 
     DG14File dg14 = readDG14(svc);
     ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(svc, dg14);
-    if (paceCam) {
-      if (!paceOutcome.established) {
-        if (!paceOutcome.attempted) {
-          throw new RuntimeException("--pace-cam requires --attempt-pace and a successful PACE session");
-        }
-        throw new RuntimeException("--pace-cam requires a successful PACE session");
-      }
-      if (dg14 == null) {
-        throw new RuntimeException("--pace-cam requires DG14 to advertise Chip Authentication");
-      }
-      if (!chipAuthOutcome.established) {
-        String message = "Chip Authentication did not establish secure messaging while --pace-cam was set";
-        if (chipAuthOutcome.failure != null && chipAuthOutcome.failure.getMessage() != null) {
-          message += ": " + chipAuthOutcome.failure.getMessage();
-        }
-        throw new RuntimeException(message);
-      }
-    }
     System.out.printf("caEstablished=%s%n", chipAuthOutcome.established);
 
     DG15File dg15 = readDG15(svc);
@@ -371,7 +348,14 @@ public class ReadDG1Main {
       String doc,
       String dob,
       String doe) throws Exception {
-    int[] tagList = new int[]{LDSFile.EF_DG1_TAG, LDSFile.EF_DG2_TAG, LDSFile.EF_DG14_TAG, LDSFile.EF_DG15_TAG};
+    int[] tagList = new int[]{
+        LDSFile.EF_DG1_TAG,
+        LDSFile.EF_DG2_TAG,
+        LDSFile.EF_DG3_TAG,
+        LDSFile.EF_DG4_TAG,
+        LDSFile.EF_DG14_TAG,
+        LDSFile.EF_DG15_TAG
+    };
     COMFile com = new COMFile("1.7", "4.0.0", tagList);
     byte[] comBytes = com.getEncoded();
 
@@ -391,6 +375,9 @@ public class ReadDG1Main {
     int faceWidth = largeDG2 ? 720 : 480;
     int faceHeight = largeDG2 ? 960 : 600;
     SODArtifacts artifacts = PersonalizationSupport.buildArtifacts(dg1Bytes, faceWidth, faceHeight, corruptDG2);
+    System.out.printf("Synthetic biometrics → DG3=%d bytes, DG4=%d bytes.%n",
+        artifacts.dg3Bytes != null ? artifacts.dg3Bytes.length : 0,
+        artifacts.dg4Bytes != null ? artifacts.dg4Bytes.length : 0);
 
     if (artifacts.cardAccessBytes != null && artifacts.cardAccessBytes.length > 0) {
       createEF(ch, EF_CARD_ACCESS, artifacts.cardAccessBytes.length, "CREATE EF.CardAccess");
@@ -411,6 +398,18 @@ public class ReadDG1Main {
     createEF(ch, EF_DG2, artifacts.dg2Bytes.length, "CREATE EF.DG2");
     selectEF(ch, EF_DG2, "SELECT EF.DG2 before WRITE");
     writeBinary(ch, artifacts.dg2Bytes, "WRITE EF.DG2");
+
+    if (artifacts.dg3Bytes != null && artifacts.dg3Bytes.length > 0) {
+      createEF(ch, EF_DG3, artifacts.dg3Bytes.length, "CREATE EF.DG3");
+      selectEF(ch, EF_DG3, "SELECT EF.DG3 before WRITE");
+      writeBinary(ch, artifacts.dg3Bytes, "WRITE EF.DG3");
+    }
+
+    if (artifacts.dg4Bytes != null && artifacts.dg4Bytes.length > 0) {
+      createEF(ch, EF_DG4, artifacts.dg4Bytes.length, "CREATE EF.DG4");
+      selectEF(ch, EF_DG4, "SELECT EF.DG4 before WRITE");
+      writeBinary(ch, artifacts.dg4Bytes, "WRITE EF.DG4");
+    }
 
     createEF(ch, EF_SOD, artifacts.sodBytes.length, "CREATE EF.SOD");
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
@@ -552,26 +551,23 @@ public class ReadDG1Main {
   }
 
   private static PaceKeySelection buildPaceKeySelection(String can, String pin, String puk, BACKey bacKey) {
-    String sanitizedCan = normalizeSecret(can);
-    if (hasText(sanitizedCan)) {
+    if (hasText(can)) {
       try {
-        return new PaceKeySelection(PACEKeySpec.createCANKey(sanitizedCan), "CAN", null);
+        return new PaceKeySelection(PACEKeySpec.createCANKey(can), "CAN", null);
       } catch (Exception e) {
         return new PaceKeySelection(null, "CAN", e);
       }
     }
-    String sanitizedPin = normalizeSecret(pin);
-    if (hasText(sanitizedPin)) {
+    if (hasText(pin)) {
       try {
-        return new PaceKeySelection(PACEKeySpec.createPINKey(sanitizedPin), "PIN", null);
+        return new PaceKeySelection(PACEKeySpec.createPINKey(pin), "PIN", null);
       } catch (Exception e) {
         return new PaceKeySelection(null, "PIN", e);
       }
     }
-    String sanitizedPuk = normalizeSecret(puk);
-    if (hasText(sanitizedPuk)) {
+    if (hasText(puk)) {
       try {
-        return new PaceKeySelection(PACEKeySpec.createPUKKey(sanitizedPuk), "PUK", null);
+        return new PaceKeySelection(PACEKeySpec.createPUKKey(puk), "PUK", null);
       } catch (Exception e) {
         return new PaceKeySelection(null, "PUK", e);
       }
@@ -1459,11 +1455,10 @@ public class ReadDG1Main {
   }
 
   private static void appendPaceSecretEntry(ByteArrayOutputStream out, byte keyReference, String value) {
-    String sanitized = normalizeSecret(value);
-    if (!hasText(sanitized)) {
+    if (!hasText(value)) {
       return;
     }
-    byte[] valueBytes = sanitized.getBytes(StandardCharsets.US_ASCII);
+    byte[] valueBytes = value.getBytes(StandardCharsets.US_ASCII);
     ByteArrayOutputStream entry = new ByteArrayOutputStream();
     entry.write(keyReference);
     entry.write(valueBytes, 0, valueBytes.length);
@@ -1493,15 +1488,7 @@ public class ReadDG1Main {
     }
   }
 
-  private static String normalizeSecret(String value) {
-    if (value == null) {
-      return null;
-    }
-    String trimmed = value.trim();
-    return trimmed.isEmpty() ? null : trimmed;
-  }
-
   private static boolean hasText(String value) {
-    return normalizeSecret(value) != null;
+    return value != null && !value.isEmpty();
   }
 }

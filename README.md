@@ -17,7 +17,7 @@
 **eMRTD Simulator** is a Java-based emulator of electronic Machine Readable Travel Documents (ePassports). It implements core ICAO 9303 protocols and is intended for educational purposes and integration testing.
 
 Core capabilities include:
-- Dynamic personalization for key data groups (EF.COM, EF.DG1, EF.DG2, EF.DG15, EF.SOD).
+- Dynamic personalization for key data groups (EF.COM, EF.DG1, EF.DG2, EF.DG3, EF.DG4, EF.DG15, EF.SOD).
 - Host tools for BAC authentication, secure messaging, DG parsing, and passive authentication verification.
 - Robust error handling for corrupted or oversized biometric payloads.
 
@@ -93,23 +93,6 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 - Expect the log line `PUT PACE secrets TLV → SW=9000`. A status word `6A80` means the host is still emitting the old, nested
   TLV format—run `mvn -q -DskipTests package` (or `mvn clean package`) to rebuild the CLI before retrying.
 
-### PACE with Stored CAN (No Seeding)
-```bash
-mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
-  -Dexec.args='--attempt-pace --can=123456'
-```
-- Demonstrates that the CLI now trims and consumes CAN/PIN/PUK values even when the chip was provisioned in an earlier run.
-- Omitting `--seed` leaves the existing secrets untouched; the supplied value is only used for the host-side PACE key derivation.
-
-### PACE → Chip Authentication Mapping (PACE-CAM)
-```bash
-mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
-  -Dexec.args='--seed --attempt-pace --pace-cam --can=123456'
-```
-- Establishes PACE with the provided secret and immediately upgrades the secure channel via Chip Authentication.
-- The run aborts if PACE fails or if DG14 does not advertise a supported Chip Authentication profile, making it ideal for CAM regression testing.
-
-
 ### BAC Fallback after Incorrect CAN
 ```bash
 mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
@@ -139,6 +122,7 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 - Supply the CVCA first and the terminal certificate second via the repeatable `--ta-cvc` flag, and point `--ta-key` at the terminal PKCS#8 PEM.
 - With the credentials present the host performs PACE, Chip Authentication, and the protected TA handshake; success is logged as `Terminal Authentication handshake completed.` followed by `EF.DG3`/`EF.DG4` access reports.
 - Omit `--ta-key` to stay in passive reporting mode when you only want CVC metadata summaries.
+- Synthetic fingerprint (DG3) and iris (DG4) payloads are now provisioned during personalization. Run the same `ReadDG1Main` command without any `--ta-cvc`/`--ta-key` flags to observe `EF.DG3 inaccessible` / `EF.DG4 inaccessible` before TA, then repeat with the credentials above to see both groups become readable under the upgraded secure messaging session.
 
 When running inside a headless shell (e.g. CI), prepend `JAVA_TOOL_OPTIONS=-Djava.awt.headless=true` so the synthetic biometric generator can render without an X server.
 
@@ -165,16 +149,15 @@ Use these paths for navigation when inspecting or modifying code.
 | Oversized DG2 | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --large-dg2' ``` | Validates large-file guardrails; DG2 parsing is skipped with a clear warning. |
 | PACE with MRZ | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --doc=123456789 --dob=750101 --doe=250101' ``` | Confirms MRZ-derived PACE succeeds when secrets align. |
 | PACE with CAN | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=123456 --doc=123456789 --dob=750101 --doe=250101' ``` | Seeds and consumes a CAN credential for PACE; adapt to `--pin/--puk` as needed. |
-| PACE with Stored CAN | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--attempt-pace --can=123456' ``` | Uses an already-provisioned CAN/PIN/PUK without re-seeding; exercises trimmed secret handling. |
-| PACE → CA (PACE-CAM) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --pace-cam --can=123456' ``` | Forces the Chip Authentication upgrade immediately after PACE and fails fast if CAM is unavailable. |
 | BAC Fallback | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=000000 --doc=123456789 --dob=750101 --doe=250101' ``` | Illustrates automatic BAC fallback after a failed CAN-based PACE attempt. |
 | Active Authentication (RSA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --require-aa' ``` | Forces a DG15-backed RSA AA verification; check for both `PUT AA ... → SW=9000` lines during seeding before the signature test. |
+| TA Gating (no credentials) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --pace-cam' ``` | Demonstrates that DG3/DG4 remain inaccessible (`SW=6985`) when TA is skipped, even after PACE→CA. |
 | Terminal Authentication (DG3/DG4) | ```bash mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain && mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key' ``` | Performs PACE→CA→TA with the demo chain and reports DG3/DG4 accessibility. |
 
 ## 🛡️ Security Features
 Implemented hardening features include:
 - **Basic Access Control (BAC)** for initial session establishment.
-- **PACE-first Negotiation** using EF.CardAccess data, with host CLI options for MRZ, CAN, PIN, or PUK secrets, whitespace-tolerant parsing, optional `--pace-cam` enforcement, and automatic BAC fallback when negotiation fails.
+- **PACE-first Negotiation** using EF.CardAccess data, with host CLI options for MRZ, CAN, PIN, or PUK secrets and automatic BAC fallback when negotiation fails.
 - **EF.CardAccess/DG14 Provisioning** during personalization so host tooling can exercise PACE/EAC awareness immediately.
 - **Chip Authentication Awareness** with DG14 parsing and secure-messaging upgrade when the card advertises CA support.
 - **Terminal Authentication (TA)** – Host performs PSO:VERIFY CERT, protected GET CHALLENGE, and EXTERNAL AUTHENTICATE to unlock DG3/DG4 when provided with a CVCA→Terminal chain and private key.
@@ -183,7 +166,7 @@ Implemented hardening features include:
 - **Demo TA Chain Generator** (`GenerateDemoTaChainMain`) produces a CVCA→Terminal certificate chain and terminal key for quick TA testing.
 - **Secure Messaging (AES + MAC)** to protect APDU exchanges.
 - **Anti-Replay Protection** through SSC monotonicity checks.
-- **LDS Personalization** for EF.COM, EF.DG1, EF.DG2, EF.DG15, EF.SOD with synthetic face image generation.
+- **LDS Personalization** for EF.COM, EF.DG1, EF.DG2, EF.DG3, EF.DG4, EF.DG15, EF.SOD with synthetic face, fingerprint, and iris assets.
 - **Passive Authentication** end-to-end (hash verification, SOD signature validation, DSC→CSCA chain building).
 - **DG2 Metadata Extraction** and reporting without exposing raw biometric data.
 - **Negative Case Handling** to capture corrupted or oversized biometric payloads gracefully.
@@ -192,7 +175,7 @@ Implemented hardening features include:
 Upcoming enhancements (not yet implemented):
 - **Additional PACE mappings and Chip Authentication refinements** to broaden interoperability beyond the current GM profile.
 - **Active Authentication negative cases and ECDSA support** for broader credential coverage.
-- **Additional PACE mappings** (e.g., Integrated Mapping) and richer error-injection scenarios beyond the current GM coverage.
+- **Extended PACE options** (PIN/PUK/CAN inputs) and richer error-injection scenarios.
 
 ## 🤝 Contributing
 1. Fork the repository.
