@@ -177,6 +177,7 @@ The JUnit suite provisions a fresh in-memory card for every test and verifies:
 - **Active Authentication** – INTERNAL AUTHENTICATE responses are verified against DG15 public keys and fail when the challenge is
   altered.
 - **Secure messaging anti-replay** – re-sending a protected APDU with the same SSC is rejected by the chip emulator.
+- **Lifecycle gating** – PRE-PERSONALIZED → PERSONALIZED → LOCKED transitions are enforced, with personalization commands returning `6986`/`6985` outside of PREP.
 
 ### Manual Scenarios
 | Scenario | Command | Notes |
@@ -192,12 +193,19 @@ The JUnit suite provisions a fresh in-memory card for every test and verifies:
 | TA Gating (no credentials) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --pace-cam' ``` | Demonstrates that DG3/DG4 remain inaccessible (`SW=6985`) when TA is skipped, even after PACE→CA. |
 | Terminal Authentication (DG3/DG4) | ```bash mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain && mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key' ``` | Performs PACE→CA→TA with the demo chain and reports DG3/DG4 accessibility. |
 
+### Lifecycle State Controls
+
+- `ReadDG1Main` now seals the emulator at the end of personalization by issuing `PUT DATA 0xDE/0xAF` (PERSONALIZED) followed by `PUT DATA 0xDE/0xAD` (LOCKED). Look for the log entries `SET LIFECYCLE → PERSONALIZED → SW=9000` and `SET LIFECYCLE → LOCKED → SW=9000` to confirm the transition.
+- Any subsequent attempt to personalize (for example re-running `PUT MRZ TLV`) will receive `SW=6986` once the chip is personalized and `SW=6985` after it is locked.
+- To exercise the lifecycle logic in isolation run `mvn -q test -Dtest=Module9LifecycleTest`, which drives the state machine and asserts the expected status words.
+
 ## 🛡️ Security Features
 Implemented hardening features include:
 - **Basic Access Control (BAC)** for initial session establishment.
 - **PACE-first Negotiation** using EF.CardAccess data, with host CLI options for MRZ, CAN, PIN, or PUK secrets and automatic BAC fallback when negotiation fails.
 - **EF.CardAccess/DG14 Provisioning** during personalization so host tooling can exercise PACE/EAC awareness immediately.
 - **Chip Authentication Awareness** with DG14 parsing and secure-messaging upgrade when the card advertises CA support.
+- **Lifecycle enforcement** with explicit PRE-PERSONALIZED → PERSONALIZED → LOCKED transitions gated by `PUT DATA 0xDE/0xAF` and `PUT DATA 0xDE/0xAD`, preventing any further personalization once the emulator is sealed.
 - **Terminal Authentication (TA)** – Host performs PSO:VERIFY CERT, protected GET CHALLENGE, and EXTERNAL AUTHENTICATE to unlock DG3/DG4 when provided with a CVCA→Terminal chain and private key.
 - **Active Authentication Verification** – Host performs `INTERNAL AUTHENTICATE` and validates the RSA signature using the DG15 public key when requested with `--require-aa`.
 - **PACE GM Implementation** on the applet side enables full AES secure messaging once the correct secret is provided.

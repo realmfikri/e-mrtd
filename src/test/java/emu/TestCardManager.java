@@ -137,6 +137,9 @@ final class TestCardManager {
     putData(channel, 0x00, 0x62, mrzSeed);
     seedActiveAuthenticationKey(channel, artifacts.docSignerKeyPair.getPrivate());
 
+    putData(channel, 0xDE, 0xAF, new byte[0]);
+    putData(channel, 0xDE, 0xAD, new byte[0]);
+
     card.disconnect(false);
 
     TerminalCardService terminalService = new TerminalCardService(terminal);
