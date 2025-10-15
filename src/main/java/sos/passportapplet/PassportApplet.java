@@ -719,8 +719,11 @@ public class PassportApplet extends Applet implements ISO7816 {
         if (paceExpectedSSC != null) {
             Arrays.fill(paceExpectedSSC, (byte) 0);
         }
-        System.out.println("PACE MSE set OID=" + oid + " keyRef=" + keyReference);
-        System.out.println("  MRZ stored? doc=" + paceDocumentNumber + " dob=" + paceDateOfBirth + " doe=" + paceDateOfExpiry);
+        boolean mrzSeeded = paceDocumentNumber != null
+                && paceDateOfBirth != null
+                && paceDateOfExpiry != null;
+        System.out.println("PACE MSE set OID=" + oid + " keyRef=" + keyReference
+                + (mrzSeeded ? " [MRZ seeded]" : " [MRZ missing]"));
     }
 
     private void processChipAuthenticationSetAt(byte[] buffer, short offset, short length) {
@@ -918,7 +921,7 @@ public class PassportApplet extends Applet implements ISO7816 {
         short dataOffset = OFFSET_CDATA;
         System.out.println("PACE GA ins, p1=" + (apdu.getBuffer()[OFFSET_P1] & 0xFF) + " p2=" + (apdu.getBuffer()[OFFSET_P2] & 0xFF) + " lc=" + lc);
         if (lc > 0) {
-            System.out.println("  GA data=" + toHex(apdu.getBuffer(), dataOffset, lc));
+            System.out.println("  GA data received (length=" + lc + " bytes)");
         }
 
         if (paceContext.getProtocolOid() == null) {
@@ -1698,9 +1701,8 @@ public class PassportApplet extends Applet implements ISO7816 {
             byte[] expectedTerminalTokenFull = mac.doFinal(chipPublicDataForTerminalToken);
             byte[] expectedTerminalToken = new byte[8];
             Util.arrayCopyNonAtomic(expectedTerminalTokenFull, (short) 0, expectedTerminalToken, (short) 0, (short) expectedTerminalToken.length);
-            System.out.println("PACE Step4 terminalToken=" + toHex(terminalToken, (short)0, (short)terminalToken.length));
-            System.out.println("PACE Step4 expectedTerminalToken=" + toHex(expectedTerminalToken, (short)0, (short)expectedTerminalToken.length));
             if (Util.arrayCompare(expectedTerminalToken, (short) 0, terminalToken, (short) 0, (short) terminalToken.length) != 0) {
+                System.out.println("PACE Step4 terminal token mismatch detected.");
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
 
@@ -1709,7 +1711,7 @@ public class PassportApplet extends Applet implements ISO7816 {
             byte[] chipTokenFull = mac.doFinal(terminalPublicDataForChipToken);
             byte[] chipToken = new byte[8];
             Util.arrayCopyNonAtomic(chipTokenFull, (short) 0, chipToken, (short) 0, (short) chipToken.length);
-            System.out.println("PACE Step4 chipToken=" + toHex(chipToken, (short)0, (short)chipToken.length));
+            System.out.println("PACE Step4 chip token generated.");
 
             paceSecureMessaging.setKeys(macKey, encKey);
             paceContext.setSessionEncKey(encKey);

@@ -158,6 +158,27 @@ src/main/java/emu/                  # Host-side Java tooling (simulator, verifie
 Use these paths for navigation when inspecting or modifying code.
 
 ## 🧪 Test Scenarios
+
+### Automated QA Matrix
+
+Run the integration suite to exercise BAC, PACE, passive authentication edge cases, Active Authentication, and secure-messaging
+replay protection:
+
+```bash
+mvn -q test
+```
+
+The JUnit suite provisions a fresh in-memory card for every test and verifies:
+
+- **BAC happy path** – DG1 is readable via secure messaging established with MRZ-derived BAC keys.
+- **PACE establishment** – AES secure messaging is negotiated using the EF.CardAccess GM profile.
+- **Passive Authentication tamper detection** – modifying EF.DG1 triggers hash verification failures under PA.
+- **Trust chain enforcement** – missing trust anchors yield a PA chain validation failure.
+- **Active Authentication** – INTERNAL AUTHENTICATE responses are verified against DG15 public keys and fail when the challenge is
+  altered.
+- **Secure messaging anti-replay** – re-sending a protected APDU with the same SSC is rejected by the chip emulator.
+
+### Manual Scenarios
 | Scenario | Command | Notes |
 |----------|---------|-------|
 | Happy Path (Issuance + PA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --require-pa' ``` | Demonstrates full workflow with successful passive authentication. |
@@ -186,6 +207,7 @@ Implemented hardening features include:
 - **LDS Personalization** for EF.COM, EF.DG1, EF.DG2, EF.DG3, EF.DG4, EF.DG15, EF.SOD with synthetic face, fingerprint, and iris assets.
 - **Passive Authentication** end-to-end (hash verification, SOD signature validation, DSC→CSCA chain building).
 - **DG2 Metadata Extraction** and reporting without exposing raw biometric data.
+- **Logging hygiene** – APDU tracer and applet diagnostics avoid printing keys, SSC values, or PACE tokens; only metadata such as lengths/OIDs is emitted.
 - **Negative Case Handling** to capture corrupted or oversized biometric payloads gracefully.
 
 ## 🧭 Roadmap
