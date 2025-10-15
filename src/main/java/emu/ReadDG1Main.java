@@ -74,24 +74,37 @@ public class ReadDG1Main {
   private static final short EF_CARD_ACCESS = PassportService.EF_CARD_ACCESS;
 
   // >>> samakan MRZ ini dengan yang kamu tulis ke EF.DG1 saat "PersoMain"
-  private static final String DOC = "123456789";
-  private static final String DOB = "750101";
-  private static final String DOE = "250101";
+  private static final String DEFAULT_DOC = "123456789";
+  private static final String DEFAULT_DOB = "750101";
+  private static final String DEFAULT_DOE = "250101";
+
+  private static final byte KEY_REF_CAN = 0x02;
+  private static final byte KEY_REF_PIN = 0x03;
+  private static final byte KEY_REF_PUK = 0x04;
 
   public static void main(String[] args) throws Exception {
     boolean seed = false;
     boolean corruptDG2 = false;
     boolean largeDG2 = false;
+    boolean attemptPace = false;
     Path trustStorePath = null;
     String trustStorePassword = null;
     boolean requirePA = false;
     List<Path> taCvcPaths = new ArrayList<>();
+    String doc = DEFAULT_DOC;
+    String dob = DEFAULT_DOB;
+    String doe = DEFAULT_DOE;
+    String can = null;
+    String pin = null;
+    String puk = null;
 
     List<String> argList = Arrays.asList(args);
     for (int i = 0; i < argList.size(); i++) {
       String arg = argList.get(i);
       if ("--seed".equals(arg)) {
         seed = true;
+      } else if ("--attempt-pace".equals(arg)) {
+        attemptPace = true;
       } else if (arg.startsWith("--trust-store=")) {
         trustStorePath = Paths.get(arg.substring("--trust-store=".length()));
       } else if ("--trust-store".equals(arg)) {
@@ -108,6 +121,36 @@ public class ReadDG1Main {
         corruptDG2 = true;
       } else if ("--large-dg2".equals(arg)) {
         largeDG2 = true;
+      } else if (arg.startsWith("--doc=")) {
+        doc = arg.substring("--doc=".length());
+      } else if ("--doc".equals(arg)) {
+        i = advanceWithValue(argList, i, "--doc");
+        doc = argList.get(i);
+      } else if (arg.startsWith("--dob=")) {
+        dob = arg.substring("--dob=".length());
+      } else if ("--dob".equals(arg)) {
+        i = advanceWithValue(argList, i, "--dob");
+        dob = argList.get(i);
+      } else if (arg.startsWith("--doe=")) {
+        doe = arg.substring("--doe=".length());
+      } else if ("--doe".equals(arg)) {
+        i = advanceWithValue(argList, i, "--doe");
+        doe = argList.get(i);
+      } else if (arg.startsWith("--can=")) {
+        can = arg.substring("--can=".length());
+      } else if ("--can".equals(arg)) {
+        i = advanceWithValue(argList, i, "--can");
+        can = argList.get(i);
+      } else if (arg.startsWith("--pin=")) {
+        pin = arg.substring("--pin=".length());
+      } else if ("--pin".equals(arg)) {
+        i = advanceWithValue(argList, i, "--pin");
+        pin = argList.get(i);
+      } else if (arg.startsWith("--puk=")) {
+        puk = arg.substring("--puk=".length());
+      } else if ("--puk".equals(arg)) {
+        i = advanceWithValue(argList, i, "--puk");
+        puk = argList.get(i);
       } else if (arg.startsWith("--ta-cvc=")) {
         taCvcPaths.add(Paths.get(arg.substring("--ta-cvc=".length())));
       } else if ("--ta-cvc".equals(arg)) {
@@ -129,13 +172,18 @@ public class ReadDG1Main {
     apdu(ch, 0x00, 0xA4, 0x04, 0x0C, MRTD_AID, "SELECT AID");
 
     // --- tulis data minimal (COM + DG1 + DG2) ke chip ---
-    SODArtifacts personalizationArtifacts = personalize(ch, corruptDG2, largeDG2);
+    SODArtifacts personalizationArtifacts = personalize(ch, corruptDG2, largeDG2, doc, dob, doe);
 
     // --- langkah penting: tanam kunci BAC di applet ---
     if (seed) {
-      byte[] mrzSeed = buildMrzSeed(DOC, DOB, DOE);
+      byte[] mrzSeed = buildMrzSeed(doc, dob, doe);
       boolean ok = putData(ch, 0x00, 0x62, mrzSeed, "PUT MRZ TLV");
       if (!ok) throw new RuntimeException("SET BAC via PUT DATA gagal. Cek format TLV.");
+      byte[] paceSecretsTlv = buildPaceSecretsTlv(can, pin, puk);
+      if (paceSecretsTlv != null) {
+        ok = putData(ch, 0x00, 0x65, paceSecretsTlv, "PUT PACE secrets TLV");
+        if (!ok) throw new RuntimeException("SET PACE secrets via PUT DATA gagal. Cek format TLV.");
+      }
     }
 
     // --- sekarang baca via PassportService + BAC ---
@@ -158,13 +206,14 @@ public class ReadDG1Main {
     svc.open();
     svc.sendSelectApplet(false);
 
-    BACKey bacKey = new BACKey(DOC, DOB, DOE);
+    BACKey bacKey = new BACKey(doc, dob, doe);
 
-    PaceOutcome paceOutcome = attemptPACE(svc, bacKey, paceInfos);
+    PaceKeySelection paceKeySelection = buildPaceKeySelection(can, pin, puk, bacKey);
+    PaceOutcome paceOutcome = attemptPACE(svc, attemptPace, paceKeySelection, paceInfos);
     if (paceOutcome.attempted) {
       logPaceOutcome(paceOutcome);
     } else {
-      System.out.println("PACE not attempted (EF.CardAccess missing or no PACE info).");
+      System.out.println("PACE not attempted (--attempt-pace not specified).");
     }
 
     if (!paceOutcome.established) {
@@ -229,13 +278,19 @@ public class ReadDG1Main {
     return next;
   }
 
-  private static SODArtifacts personalize(CardChannel ch, boolean corruptDG2, boolean largeDG2) throws Exception {
+  private static SODArtifacts personalize(
+      CardChannel ch,
+      boolean corruptDG2,
+      boolean largeDG2,
+      String doc,
+      String dob,
+      String doe) throws Exception {
     int[] tagList = new int[]{LDSFile.EF_DG1_TAG, LDSFile.EF_DG2_TAG, LDSFile.EF_DG14_TAG, LDSFile.EF_DG15_TAG};
     COMFile com = new COMFile("1.7", "4.0.0", tagList);
     byte[] comBytes = com.getEncoded();
 
     MRZInfo mrz = new MRZInfo("P<", "UTO", "BEAN", "HAPPY",
-        DOC, "UTO", DOB, Gender.MALE, DOE, "");
+        doc, "UTO", dob, Gender.MALE, doe, "");
     DG1File dg1 = new DG1File(mrz);
     byte[] dg1Bytes = dg1.getEncoded();
 
@@ -361,19 +416,68 @@ public class ReadDG1Main {
     }
   }
 
-  private static PaceOutcome attemptPACE(PassportService svc, BACKey bacKey, List<PACEInfo> paceInfos) {
+  private static PaceKeySelection buildPaceKeySelection(String can, String pin, String puk, BACKey bacKey) {
+    if (hasText(can)) {
+      try {
+        return new PaceKeySelection(PACEKeySpec.createCANKey(can), "CAN", null);
+      } catch (Exception e) {
+        return new PaceKeySelection(null, "CAN", e);
+      }
+    }
+    if (hasText(pin)) {
+      try {
+        return new PaceKeySelection(PACEKeySpec.createPINKey(pin), "PIN", null);
+      } catch (Exception e) {
+        return new PaceKeySelection(null, "PIN", e);
+      }
+    }
+    if (hasText(puk)) {
+      try {
+        return new PaceKeySelection(PACEKeySpec.createPUKKey(puk), "PUK", null);
+      } catch (Exception e) {
+        return new PaceKeySelection(null, "PUK", e);
+      }
+    }
+    try {
+      return new PaceKeySelection(PACEKeySpec.createMRZKey(bacKey), "MRZ", null);
+    } catch (Exception e) {
+      return new PaceKeySelection(null, "MRZ", e);
+    }
+  }
+
+  private static PaceOutcome attemptPACE(
+      PassportService svc,
+      boolean attemptPace,
+      PaceKeySelection keySelection,
+      List<PACEInfo> paceInfos) {
     PaceOutcome outcome = new PaceOutcome();
+    outcome.attempted = attemptPace;
+    outcome.keySelection = keySelection;
+    if (!attemptPace) {
+      return outcome;
+    }
     if (paceInfos == null || paceInfos.isEmpty()) {
       return outcome;
     }
     outcome.availableOptions = paceInfos.size();
-    outcome.attempted = true;
     outcome.selectedInfo = selectPreferredPACEInfo(paceInfos);
+    if (keySelection == null) {
+      outcome.failure = new IllegalStateException("PACE key not configured");
+      return outcome;
+    }
+    if (keySelection.error != null) {
+      outcome.failure = keySelection.error;
+      return outcome;
+    }
+    if (keySelection.keySpec == null) {
+      outcome.failure = new IllegalStateException("PACE key spec unavailable");
+      return outcome;
+    }
     try {
       AlgorithmParameterSpec parameterSpec = buildPaceParameterSpec(outcome.selectedInfo);
       String protocolOid = outcome.selectedInfo.getObjectIdentifier();
       PACEResult result = svc.doPACE(
-          PACEKeySpec.createMRZKey(bacKey),
+          keySelection.keySpec,
           protocolOid,
           parameterSpec,
           outcome.selectedInfo.getParameterId());
@@ -387,6 +491,12 @@ public class ReadDG1Main {
 
   private static void logPaceOutcome(PaceOutcome outcome) {
     System.out.printf("PACE entries advertised: %d%n", outcome.availableOptions);
+    if (outcome.keySelection != null && outcome.keySelection.label != null) {
+      System.out.printf("PACE key source: %s%n", outcome.keySelection.label);
+    }
+    if (outcome.keySelection != null && outcome.keySelection.error != null) {
+      System.out.println("PACE key preparation failed: " + outcome.keySelection.error.getMessage());
+    }
     if (outcome.selectedInfo != null) {
       BigInteger parameterId = outcome.selectedInfo.getParameterId();
       String displayOid = outcome.selectedInfo.getProtocolOIDString();
@@ -407,6 +517,9 @@ public class ReadDG1Main {
           outcome.result.getCipherAlg(),
           outcome.result.getDigestAlg(),
           outcome.result.getKeyLength());
+    }
+    if (outcome.availableOptions == 0) {
+      System.out.println("PACE info not present in EF.CardAccess.");
     }
     if (outcome.established) {
       System.out.println("PACE secure messaging established.");
@@ -690,9 +803,22 @@ public class ReadDG1Main {
     boolean attempted;
     boolean established;
     int availableOptions;
+    PaceKeySelection keySelection;
     PACEInfo selectedInfo;
     PACEResult result;
     Exception failure;
+  }
+
+  private static final class PaceKeySelection {
+    final PACEKeySpec keySpec;
+    final String label;
+    final Exception error;
+
+    private PaceKeySelection(PACEKeySpec keySpec, String label, Exception error) {
+      this.keySpec = keySpec;
+      this.label = label;
+      this.error = error;
+    }
   }
 
   private static final class ChipAuthOutcome {
@@ -844,6 +970,38 @@ public class ReadDG1Main {
     return outer.toByteArray();
   }
 
+  private static byte[] buildPaceSecretsTlv(String can, String pin, String puk) {
+    ByteArrayOutputStream entries = new ByteArrayOutputStream();
+    appendPaceSecretEntry(entries, KEY_REF_CAN, can);
+    appendPaceSecretEntry(entries, KEY_REF_PIN, pin);
+    appendPaceSecretEntry(entries, KEY_REF_PUK, puk);
+
+    byte[] entryBytes = entries.toByteArray();
+    if (entryBytes.length == 0) {
+      return null;
+    }
+
+    ByteArrayOutputStream container = new ByteArrayOutputStream();
+    container.write(0x65);
+    writeLength(container, entryBytes.length);
+    container.write(entryBytes, 0, entryBytes.length);
+    return container.toByteArray();
+  }
+
+  private static void appendPaceSecretEntry(ByteArrayOutputStream out, byte keyReference, String value) {
+    if (!hasText(value)) {
+      return;
+    }
+    byte[] valueBytes = value.getBytes(StandardCharsets.US_ASCII);
+    ByteArrayOutputStream entry = new ByteArrayOutputStream();
+    entry.write(keyReference);
+    entry.write(valueBytes, 0, valueBytes.length);
+    byte[] entryBytes = entry.toByteArray();
+    writeTag(out, 0x66);
+    writeLength(out, entryBytes.length);
+    out.write(entryBytes, 0, entryBytes.length);
+  }
+
   private static void writeTag(ByteArrayOutputStream out, int tag) {
     if (tag > 0xFF) {
       out.write((tag >> 8) & 0xFF);
@@ -862,5 +1020,9 @@ public class ReadDG1Main {
         out.write((length >> (8 * i)) & 0xFF);
       }
     }
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isEmpty();
   }
 }
