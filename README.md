@@ -99,7 +99,7 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 - Demonstrates graceful failure when the provided CAN does not match the seeded value.
 - Observe the log message `PACE failed` followed by `Falling back to BAC secure messaging.`
 
-Add the repeatable flag `--ta-cvc <path/to/cvc>` to load terminal authentication certificates for reporting. The host will parse and summarise the supplied CVCs without attempting to sign challenges.
+Add the repeatable flag `--ta-cvc <path/to/cvc>` to load terminal authentication certificates for reporting. Supply a valid CVC file (for example, one produced by `GenerateDemoCvcMain`, see below); the host will parse and summarise the supplied CVCs without attempting to sign challenges.
 
 When running inside a headless shell (e.g. CI), prepend `JAVA_TOOL_OPTIONS=-Djava.awt.headless=true` so the synthetic biometric generator can render without an X server.
 
