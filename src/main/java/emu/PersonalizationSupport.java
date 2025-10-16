@@ -149,14 +149,21 @@ final class PersonalizationSupport {
     DG15File dg15File = new DG15File(aaKeyPair.getPublic());
     byte[] dg15Bytes = dg15File.getEncoded();
 
-    PACEInfo paceInfo = new PACEInfo(SecurityInfo.ID_PACE_ECDH_GM_AES_CBC_CMAC_128, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1);
-    CardAccessFile cardAccessFile = new CardAccessFile(Collections.singletonList(paceInfo));
+    List<SecurityInfo> paceInfos = new ArrayList<>();
+    paceInfos.add(new PACEInfo(SecurityInfo.ID_PACE_ECDH_GM_AES_CBC_CMAC_128, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
+    paceInfos.add(new PACEInfo(SecurityInfo.ID_PACE_ECDH_IM_AES_CBC_CMAC_128, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
+    paceInfos.add(new PACEInfo(SecurityInfo.ID_PACE_ECDH_GM_3DES_CBC_CBC, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
+    paceInfos.add(new PACEInfo(SecurityInfo.ID_PACE_ECDH_IM_3DES_CBC_CBC, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
+    CardAccessFile cardAccessFile = new CardAccessFile(paceInfos);
     byte[] cardAccessBytes = cardAccessFile.getEncoded();
 
     List<SecurityInfo> dg14Infos = new ArrayList<>();
     BigInteger chipKeyId = BigInteger.ONE;
     dg14Infos.add(new ChipAuthenticationPublicKeyInfo(chipAuthKeyPair.getPublic(), chipKeyId));
     dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_128, 2, chipKeyId));
+    dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_192, 2, chipKeyId));
+    dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_256, 2, chipKeyId));
+    dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_3DES_CBC_CBC, 2, chipKeyId));
     dg14Infos.add(new TerminalAuthenticationInfo((short) 0x011C, (byte) 0x1C));
     DG14File dg14File = new DG14File(dg14Infos);
     byte[] dg14Bytes = dg14File.getEncoded();
