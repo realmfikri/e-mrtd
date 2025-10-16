@@ -182,6 +182,7 @@ public class PassportApplet extends Applet implements ISO7816 {
     private static final byte PACE_SECRET_CONTAINER_TAG = 0x65;
 
     private static final byte PACE_SECRET_ENTRY_TAG = 0x66;
+    private static final byte CURRENT_DATE_TAG = 0x67;
 
     private static final byte ECPRIVATEKEY_TAG = 0x63;
 
@@ -969,6 +970,14 @@ public class PassportApplet extends Applet implements ISO7816 {
             return;
         }
 
+        if (p1 == 0 && p2 == CURRENT_DATE_TAG) {
+            if (lc != (short) 6) {
+                ISOException.throwIt(SW_WRONG_LENGTH);
+            }
+            certificate.setCurrentDate(buffer, buffer_p, lc);
+            return;
+        }
+
         assertPrePersonalized();
 
         if (p1 == 0 && p2 == PRIVMODULUS_TAG) {
@@ -1046,20 +1055,38 @@ public class PassportApplet extends Applet implements ISO7816 {
                     encKey_p);
             persistentState |= HAS_MUTUALAUTHENTICATION_KEYS;
         } else if (p1 == 0 && p2 == PACE_SECRET_CONTAINER_TAG) {
+            short start = buffer_p;
             short finish = (short) (buffer_p + lc);
+            if (lc > 0) {
+                short preview = BERTLVScanner.readTag(buffer, buffer_p);
+                short tag = BERTLVScanner.tag;
+                short valueOffset = BERTLVScanner.readLength(buffer, preview);
+                short valueLength = BERTLVScanner.valueLength;
+                if (tag == PACE_SECRET_CONTAINER_TAG) {
+                    short nestedEnd = (short) (valueOffset + valueLength);
+                    if (nestedEnd > finish) {
+                        ISOException.throwIt(SW_WRONG_LENGTH);
+                    }
+                    buffer_p = valueOffset;
+                    finish = nestedEnd;
+                } else {
+                    buffer_p = start;
+                }
+            }
             while (buffer_p < finish) {
                 buffer_p = BERTLVScanner.readTag(buffer, buffer_p);
                 if (BERTLVScanner.tag != PACE_SECRET_ENTRY_TAG) {
                     ISOException.throwIt(SW_WRONG_DATA);
                 }
                 buffer_p = BERTLVScanner.readLength(buffer, buffer_p);
+                short entryOffset = BERTLVScanner.valueOffset;
                 short entryLen = BERTLVScanner.valueLength;
                 if (entryLen < 2) {
                     ISOException.throwIt(SW_WRONG_LENGTH);
                 }
-                byte keyRef = buffer[buffer_p];
-                paceSecrets.setSecret(keyRef, buffer, (short) (buffer_p + 1), (short) (entryLen - 1));
-                buffer_p = BERTLVScanner.skipValue();
+                byte keyRef = buffer[entryOffset];
+                paceSecrets.setSecret(keyRef, buffer, (short) (entryOffset + 1), (short) (entryLen - 1));
+                buffer_p = (short) (entryOffset + entryLen);
             }
         } else if (p1 == 0 && p2 == ECPRIVATEKEY_TAG) {
             short finish = (short) (buffer_p + lc);

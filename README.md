@@ -136,6 +136,7 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 ```
 - The generator emits a demo CVCA certificate, a terminal certificate signed by that CVCA, and the matching terminal private key under `target/ta-demo/`.
 - Supply the CVCA first and the terminal certificate second via the repeatable `--ta-cvc` flag, and point `--ta-key` at the terminal PKCS#8 PEM.
+- Override the simulated "current date" used for Terminal Authentication validity checks with `--ta-date=YYYY-MM-DD` (defaults to the host's current UTC date if omitted).
 - With the credentials present the host performs PACE, Chip Authentication, and the protected TA handshake; success is logged as `Terminal Authentication handshake completed.` followed by `EF.DG3`/`EF.DG4` access reports.
 - Omit `--ta-key` to stay in passive reporting mode when you only want CVC metadata summaries.
 - Synthetic fingerprint (DG3) and iris (DG4) payloads are now provisioned during personalization. Run the same `ReadDG1Main` command without any `--ta-cvc`/`--ta-key` flags to observe `EF.DG3 inaccessible` / `EF.DG4 inaccessible` before TA, then repeat with the credentials above to see both groups become readable under the upgraded secure messaging session.
