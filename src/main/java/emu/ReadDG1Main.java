@@ -62,11 +62,14 @@ import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
+import java.security.Signature;
+import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -103,6 +106,8 @@ public class ReadDG1Main {
   private static final byte KEY_REF_PIN = 0x03;
   private static final byte KEY_REF_PUK = 0x04;
 
+  private static final int PUT_DATA_P2_CURRENT_DATE = 0x67;
+
   private static final int AA_CHALLENGE_LENGTH = 8;
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
@@ -124,6 +129,7 @@ public class ReadDG1Main {
     String can = null;
     String pin = null;
     String puk = null;
+    String taDateOverride = null;
 
     List<String> argList = Arrays.asList(args);
     for (int i = 0; i < argList.size(); i++) {
@@ -202,6 +208,11 @@ public class ReadDG1Main {
       } else if ("--ta-key".equals(arg)) {
         i = advanceWithValue(argList, i, "--ta-key");
         taKeyPath = Paths.get(argList.get(i));
+      } else if (arg.startsWith("--ta-date=")) {
+        taDateOverride = arg.substring("--ta-date=".length());
+      } else if ("--ta-date".equals(arg)) {
+        i = advanceWithValue(argList, i, "--ta-date");
+        taDateOverride = argList.get(i);
       } else if (arg.startsWith("--out=")) {
         jsonOutPath = Paths.get(arg.substring("--out=".length()));
       } else if ("--out".equals(arg)) {
@@ -209,6 +220,8 @@ public class ReadDG1Main {
         jsonOutPath = Paths.get(argList.get(i));
       }
     }
+
+    LocalDate terminalAuthDate = resolveTerminalAuthDate(taDateOverride);
 
     // Boot emulator & install applet
     SessionReport report = new SessionReport();
@@ -244,6 +257,12 @@ public class ReadDG1Main {
               sw));
         }
       }
+    }
+
+    byte[] currentDateTlv = encodeCurrentDate(terminalAuthDate);
+    int dateSw = putData(ch, 0x00, PUT_DATA_P2_CURRENT_DATE, currentDateTlv, "PUT current date digits");
+    if (dateSw != 0x9000) {
+      throw new RuntimeException(String.format("Gagal menetapkan tanggal saat ini untuk TA (SW=%04X).", dateSw));
     }
 
     int lifecycleSw = putData(ch, 0xDE, 0xAF, new byte[0], "SET LIFECYCLE → PERSONALIZED");
@@ -925,10 +944,10 @@ public class ReadDG1Main {
       }
 
       if (outcome.verified) {
-        int keyLength = resolveKeyLength(outcome.publicKey);
-        if (keyLength > 0) {
+        Integer keyBits = describeKeyBits(outcome.publicKey);
+        if (keyBits != null) {
           System.out.printf("Active Authentication verified (%s %d-bit).%n",
-              outcome.publicKey.getAlgorithm(), keyLength);
+              outcome.publicKey.getAlgorithm(), keyBits);
         } else {
           System.out.printf("Active Authentication verified (%s).%n",
               outcome.publicKey.getAlgorithm());
@@ -971,24 +990,46 @@ public class ReadDG1Main {
     return expectedResponseLength > 0 && response.length != expectedResponseLength;
   }
 
-  private static int resolveKeyLength(PublicKey key) {
+  private static Integer describeKeyBits(PublicKey key) {
     if (key instanceof RSAPublicKey) {
       return ((RSAPublicKey) key).getModulus().bitLength();
     }
-    return -1;
+    if (key instanceof ECPublicKey) {
+      return ((ECPublicKey) key).getParams().getCurve().getField().getFieldSize();
+    }
+    return null;
   }
 
   private static int expectedAaResponseLength(PublicKey key) {
-    int keyBits = resolveKeyLength(key);
-    return keyBits > 0 ? keyBits / Byte.SIZE : -1;
+    if (key instanceof RSAPublicKey) {
+      int keyBits = ((RSAPublicKey) key).getModulus().bitLength();
+      return keyBits / Byte.SIZE;
+    }
+    return -1;
   }
 
   private static String resolveAADigestAlgorithm(PublicKey key) {
     if (key == null) {
       return null;
     }
-    if ("RSA".equalsIgnoreCase(key.getAlgorithm())) {
+    if (key instanceof RSAPublicKey || "RSA".equalsIgnoreCase(key.getAlgorithm())) {
       return "SHA-1";
+    }
+    if (key instanceof ECPublicKey) {
+      int fieldSize = ((ECPublicKey) key).getParams().getCurve().getField().getFieldSize();
+      if (fieldSize <= 192) {
+        return "SHA-1";
+      }
+      if (fieldSize <= 224) {
+        return "SHA-224";
+      }
+      if (fieldSize <= 256) {
+        return "SHA-256";
+      }
+      if (fieldSize <= 384) {
+        return "SHA-384";
+      }
+      return "SHA-512";
     }
     return null;
   }
@@ -997,32 +1038,44 @@ public class ReadDG1Main {
     if (key == null) {
       return null;
     }
-    if ("RSA".equalsIgnoreCase(key.getAlgorithm())) {
+    if (key instanceof RSAPublicKey || "RSA".equalsIgnoreCase(key.getAlgorithm())) {
       return "SHA1withRSA";
+    }
+    if (key instanceof ECPublicKey || "EC".equalsIgnoreCase(key.getAlgorithm())) {
+      String digest = resolveAADigestAlgorithm(key);
+      if (digest == null) {
+        return "SHA256withECDSA";
+      }
+      return digest.replace("-", "") + "withECDSA";
     }
     return key.getAlgorithm();
   }
 
   private static boolean verifyActiveAuthenticationSignature(
       PublicKey key, byte[] challenge, byte[] response) throws GeneralSecurityException {
-    if (!(key instanceof RSAPublicKey)) {
-      throw new GeneralSecurityException("Unsupported AA key algorithm: " + key.getAlgorithm());
-    }
     if (response == null || response.length == 0) {
       return false;
     }
+    if (key instanceof RSAPublicKey) {
+      return verifyRsaActiveAuthentication((RSAPublicKey) key, challenge, response);
+    }
+    if (key instanceof ECPublicKey) {
+      return verifyEcdsaActiveAuthentication((ECPublicKey) key, challenge, response);
+    }
+    throw new GeneralSecurityException("Unsupported AA key algorithm: " + key.getAlgorithm());
+  }
 
+  private static boolean verifyRsaActiveAuthentication(RSAPublicKey key, byte[] challenge, byte[] response)
+      throws GeneralSecurityException {
     Cipher cipher = Cipher.getInstance("RSA/ECB/NoPadding");
     cipher.init(Cipher.DECRYPT_MODE, key);
     byte[] plain = cipher.doFinal(response);
     if (plain.length < 1 + 20 + 1) {
       return false;
     }
-
     if ((plain[0] & 0xFF) != 0x6A || (plain[plain.length - 1] & 0xFF) != 0xBC) {
       return false;
     }
-
     int digestLength = 20;
     int digestOffset = plain.length - 1 - digestLength;
     if (digestOffset <= 1) {
@@ -1030,13 +1083,112 @@ public class ReadDG1Main {
     }
     int m1Offset = 1;
     int m1Length = digestOffset - m1Offset;
-
     MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
     sha1.update(plain, m1Offset, m1Length);
     sha1.update(challenge);
     byte[] expectedDigest = sha1.digest();
     byte[] actualDigest = Arrays.copyOfRange(plain, digestOffset, digestOffset + digestLength);
     return MessageDigest.isEqual(expectedDigest, actualDigest);
+  }
+
+  private static boolean verifyEcdsaActiveAuthentication(
+      ECPublicKey key, byte[] challenge, byte[] response)
+      throws GeneralSecurityException {
+    GeneralSecurityException lastError = null;
+    for (String algorithm : buildEcdsaSignatureCandidates(key)) {
+      try {
+        Signature verifier = Signature.getInstance(algorithm);
+        verifier.initVerify(key);
+        verifier.update(challenge);
+        if (verifier.verify(response)) {
+          return true;
+        }
+      } catch (GeneralSecurityException e) {
+        lastError = e;
+      }
+    }
+    if (lastError != null) {
+      throw lastError;
+    }
+    return false;
+  }
+
+  private static List<String> buildEcdsaSignatureCandidates(ECPublicKey key) {
+    List<String> algorithms = new ArrayList<>();
+    String preferred = resolveAASignatureAlgorithm(key);
+    if (hasText(preferred) && !algorithms.contains(preferred)) {
+      algorithms.add(preferred);
+    }
+    int fieldSize = key.getParams().getCurve().getField().getFieldSize();
+    if (fieldSize <= 192) {
+      addIfMissing(algorithms, "SHA1withECDSA");
+      addIfMissing(algorithms, "SHA224withECDSA");
+    } else if (fieldSize <= 256) {
+      addIfMissing(algorithms, "SHA256withECDSA");
+      addIfMissing(algorithms, "SHA224withECDSA");
+    } else if (fieldSize <= 384) {
+      addIfMissing(algorithms, "SHA384withECDSA");
+      addIfMissing(algorithms, "SHA256withECDSA");
+    } else {
+      addIfMissing(algorithms, "SHA512withECDSA");
+      addIfMissing(algorithms, "SHA384withECDSA");
+    }
+    addIfMissing(algorithms, "SHA512withECDSA");
+    return algorithms;
+  }
+
+  private static void addIfMissing(List<String> algorithms, String candidate) {
+    if (!algorithms.contains(candidate)) {
+      algorithms.add(candidate);
+    }
+  }
+
+  private static byte[] encodeCurrentDate(LocalDate date) {
+    byte[] digits = new byte[6];
+    int year = date.getYear() % 100;
+    int month = date.getMonthValue();
+    int day = date.getDayOfMonth();
+    digits[0] = (byte) ((year / 10) % 10);
+    digits[1] = (byte) (year % 10);
+    digits[2] = (byte) (month / 10);
+    digits[3] = (byte) (month % 10);
+    digits[4] = (byte) (day / 10);
+    digits[5] = (byte) (day % 10);
+    return digits;
+  }
+
+  private static LocalDate resolveTerminalAuthDate(String override) {
+    LocalDate defaultDate = LocalDate.now(ZoneOffset.UTC);
+    if (!hasText(override)) {
+      return defaultDate;
+    }
+    String trimmed = override.trim();
+    try {
+      return LocalDate.parse(trimmed, DateTimeFormatter.ISO_LOCAL_DATE);
+    } catch (Exception ignored) {
+      // continue
+    }
+    String digitsOnly = trimmed.replaceAll("[^0-9]", "");
+    if (digitsOnly.length() == 8) {
+      int year = Integer.parseInt(digitsOnly.substring(0, 4));
+      int month = Integer.parseInt(digitsOnly.substring(4, 6));
+      int day = Integer.parseInt(digitsOnly.substring(6, 8));
+      return LocalDate.of(year, month, day);
+    }
+    if (digitsOnly.length() == 6) {
+      int year = Integer.parseInt(digitsOnly.substring(0, 2));
+      int month = Integer.parseInt(digitsOnly.substring(2, 4));
+      int day = Integer.parseInt(digitsOnly.substring(4, 6));
+      int centuryBase = defaultDate.getYear() / 100 * 100;
+      int fullYear = centuryBase + year;
+      if (fullYear < defaultDate.getYear() - 50) {
+        fullYear += 100;
+      } else if (fullYear > defaultDate.getYear() + 50) {
+        fullYear -= 100;
+      }
+      return LocalDate.of(fullYear, month, day);
+    }
+    throw new IllegalArgumentException("Unsupported TA date format: " + override);
   }
 
   private static ChipAuthenticationInfo selectPreferredChipAuth(List<ChipAuthenticationInfo> chipInfos) {

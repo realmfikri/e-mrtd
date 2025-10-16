@@ -73,7 +73,10 @@ public class CVCertificate {
     byte[] currentCertExpDate;
     byte[] accessFlag;
 
+    private static final byte FLAG_CURRENT_DATE_MANUAL = 0x01;
+
     byte[] currentDate = { 0x00, 0x09, 0x00, 0x01, 0x00, 0x01 }; // 2009-01-01
+    private byte currentDateFlags;
 
     Signature signature;
 
@@ -244,6 +247,9 @@ public class CVCertificate {
             boolean bit1 = (byte)(effectiveCertAuthorization[0] & ROLE_DV_DOMESTIC) == ROLE_DV_DOMESTIC;
             boolean bit2 = (byte)(effectiveCertAuthorization[0] & ROLE_DV_FOREIGN) == ROLE_DV_FOREIGN;
             boolean setTime = bit1 || bit2 || preDomestic;
+            if (hasManualCurrentDate()) {
+                setTime = false;
+            }
             boolean setCert = bit1 && bit2;
             boolean grantAccess = !bit1 && !bit2;
             if(setTime && compareDate(currentDate, (short)0, currentCertEffDate, (short)0) >= 0) {
@@ -292,6 +298,31 @@ public class CVCertificate {
             clear();
         }
         return result;
+    }
+
+    boolean hasManualCurrentDate() {
+        return (currentDateFlags & FLAG_CURRENT_DATE_MANUAL) == FLAG_CURRENT_DATE_MANUAL;
+    }
+
+    void setCurrentDate(byte[] data, short offset, short length) {
+        if (length != (short)6) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+        for (short i = 0; i < length; i++) {
+            byte digit = data[(short)(offset + i)];
+            if (digit < 0) {
+                ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+            }
+            if (digit > 9) {
+                if (digit >= '0' && digit <= '9') {
+                    digit = (byte)(digit - '0');
+                } else {
+                    ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+                }
+            }
+            currentDate[i] = digit;
+        }
+        currentDateFlags |= FLAG_CURRENT_DATE_MANUAL;
     }
 
     // Updates the cvcaFile contents with the new CVCA reference
