@@ -73,6 +73,10 @@ public class FileSystem {
 
     static final short SOS_LOG_FID = (short) 0xdead;
 
+    static final byte NO_SFI = 0x00;
+
+    static final short INVALID_FID = (short) -1;
+
     private static final short EF_DG1_INDEX = (short) 0;
 
     private static final short EF_DG2_INDEX = (short) 1;
@@ -185,6 +189,92 @@ public class FileSystem {
             return -1;
         }
         return fileSizes[idx];
+    }
+
+    public byte getSFI(short fid) {
+        switch (fid) {
+        case EF_DG1_FID:
+            return 0x01;
+        case EF_DG2_FID:
+            return 0x02;
+        case EF_DG3_FID:
+            return 0x03;
+        case EF_DG4_FID:
+            return 0x04;
+        case EF_DG5_FID:
+            return 0x05;
+        case EF_DG6_FID:
+            return 0x06;
+        case EF_DG7_FID:
+            return 0x07;
+        case EF_DG8_FID:
+            return 0x08;
+        case EF_DG9_FID:
+            return 0x09;
+        case EF_DG10_FID:
+            return 0x0A;
+        case EF_DG11_FID:
+            return 0x0B;
+        case EF_DG12_FID:
+            return 0x0C;
+        case EF_DG13_FID:
+            return 0x0D;
+        case EF_DG14_FID:
+            return 0x0E;
+        case EF_DG15_FID:
+            return 0x0F;
+        case EF_CVCA_FID:
+            return 0x1C;
+        case EF_SOD_FID:
+            return 0x1D;
+        case EF_COM_FID:
+            return 0x1E;
+        default:
+            return NO_SFI;
+        }
+    }
+
+    public short getFidForSfi(byte sfi) {
+        switch (sfi) {
+        case 0x01:
+            return EF_DG1_FID;
+        case 0x02:
+            return EF_DG2_FID;
+        case 0x03:
+            return EF_DG3_FID;
+        case 0x04:
+            return EF_DG4_FID;
+        case 0x05:
+            return EF_DG5_FID;
+        case 0x06:
+            return EF_DG6_FID;
+        case 0x07:
+            return EF_DG7_FID;
+        case 0x08:
+            return EF_DG8_FID;
+        case 0x09:
+            return EF_DG9_FID;
+        case 0x0A:
+            return EF_DG10_FID;
+        case 0x0B:
+            return EF_DG11_FID;
+        case 0x0C:
+            return EF_DG12_FID;
+        case 0x0D:
+            return EF_DG13_FID;
+        case 0x0E:
+            return EF_DG14_FID;
+        case 0x0F:
+            return EF_DG15_FID;
+        case 0x1C:
+            return EF_CVCA_FID;
+        case 0x1D:
+            return EF_SOD_FID;
+        case 0x1E:
+            return EF_COM_FID;
+        default:
+            return INVALID_FID;
+        }
     }
 
     private static short getFileIndex(short fid) throws ISOException {

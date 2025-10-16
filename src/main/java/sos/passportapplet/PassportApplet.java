@@ -198,6 +198,9 @@ public class PassportApplet extends Applet implements ISO7816 {
 
     static final short SW_INTERNAL_ERROR = (short) 0x6d66;
 
+    private static final byte[] RSA_ENCRYPTION_OID = new byte[] { 0x2A, (byte) 0x86, 0x48, (byte) 0x86,
+            (byte) 0xF7, 0x0D, 0x01, 0x01, 0x01 };
+
     private byte[] rnd;
 
     private byte[] ssc;
@@ -257,7 +260,7 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         fileSystem = new FileSystem();
 
-        persistentState = 0;
+        persistentState = ALLOW_OPEN_COM_SOD_READS;
         setLifecycleState(LIFECYCLE_PREPERSONALIZED);
 
         randomData = RandomData.getInstance(RandomData.ALG_PSEUDO_RANDOM);
@@ -448,7 +451,7 @@ public class PassportApplet extends Applet implements ISO7816 {
             responseLength = processInternalAuthenticate(apdu, protectedApdu);
             break;
         case INS_SELECT_FILE:
-            processSelectFile(apdu);
+            responseLength = processSelectFile(apdu, protectedApdu);
             break;
         case INS_READ_BINARY:
             responseLength = processReadBinary(apdu, le, protectedApdu);
@@ -568,7 +571,16 @@ public class PassportApplet extends Applet implements ISO7816 {
     }
 
     private short normalizeSmError(short reason) {
-        return ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED;
+        if (reason == ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED) {
+            return (short) 0x6988;
+        }
+        if (reason == ISO7816.SW_DATA_INVALID) {
+            return ISO7816.SW_DATA_INVALID;
+        }
+        if (reason == ISO7816.SW_WRONG_LENGTH) {
+            return ISO7816.SW_WRONG_LENGTH;
+        }
+        return reason;
     }
 
     private short processPSO(APDU apdu) {
@@ -577,7 +589,7 @@ public class PassportApplet extends Applet implements ISO7816 {
             ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
         }
         if (buffer[OFFSET_P1] != (byte) 0x00
-                && buffer[OFFSET_P2] != P2_VERIFYCERT) {
+                || buffer[OFFSET_P2] != P2_VERIFYCERT) {
             ISOException.throwIt(SW_INCORRECT_P1P2);
         }
         if (certificate.currentCertSubjectId[0] == 0) {
@@ -1122,17 +1134,17 @@ public class PassportApplet extends Applet implements ISO7816 {
                 case (short) 0x81:
                     if (len == (short) 6) {
                         short e1 = Util.getShort(buffer, buffer_p);
-                        short e2 = Util
-                                .getShort(buffer, (short) (buffer_p + 2));
-                        short e3 = Util
-                                .getShort(buffer, (short) (buffer_p + 4));
+                        short e2 = Util.getShort(buffer, (short) (buffer_p + 2));
+                        short e3 = Util.getShort(buffer, (short) (buffer_p + 4));
                         keyStore.ecPrivateKey.setFieldF2M(e1, e2, e3);
                         keyStore.ecPublicKey.setFieldF2M(e1, e2, e3);
+                    } else if (len == (short) 2) {
+                        short polynomial = Util.getShort(buffer, buffer_p);
+                        keyStore.ecPrivateKey.setFieldF2M(polynomial);
+                        keyStore.ecPublicKey.setFieldF2M(polynomial);
                     } else {
-                        keyStore.ecPrivateKey.setFieldF2M(Util.getShort(buffer,
-                                buffer_p));
-                        keyStore.ecPublicKey.setFieldF2M(Util.getShort(buffer,
-                                buffer_p));
+                        keyStore.ecPrivateKey.setFieldFP(buffer, buffer_p, len);
+                        keyStore.ecPublicKey.setFieldFP(buffer, buffer_p, len);
                     }
                     break;
                 case (short) 0x82:
@@ -1439,18 +1451,18 @@ public class PassportApplet extends Applet implements ISO7816 {
      * @param apdu
      *            where the first 2 data bytes encode the file to select.
      */
-    private void processSelectFile(APDU apdu) {
+    private short processSelectFile(APDU apdu, boolean protectedApdu) {
         byte[] buffer = apdu.getBuffer();
         short lc = (short) (buffer[OFFSET_LC] & 0x00FF);
 
-        if (lc != 2)
+        if (lc != 2) {
             ISOException.throwIt(SW_WRONG_LENGTH);
+        }
 
         if (apdu.getCurrentState() == APDU.STATE_INITIAL) {
             apdu.setIncomingAndReceive();
         }
         if (apdu.getCurrentState() != APDU.STATE_FULL_INCOMING) {
-            // need all data in one APDU.
             ISOException.throwIt(SW_INTERNAL_ERROR);
         }
 
@@ -1462,13 +1474,69 @@ public class PassportApplet extends Applet implements ISO7816 {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
 
-        if (fileSystem.exists(fid)) {
-            selectedFile = fid;
-            volatileState[0] |= FILE_SELECTED;
-            return;
+        if (!fileSystem.exists(fid)) {
+            setNoFileSelected();
+            ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
         }
-        setNoFileSelected();
-        ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
+
+        selectedFile = fid;
+        volatileState[0] |= FILE_SELECTED;
+
+        short fileSize = fileSystem.getFileSize(fid);
+        if (fileSize < 0) {
+            ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
+        }
+
+        byte sfi = fileSystem.getSFI(fid);
+        short responseLength = getSelectResponseLength(sfi);
+        short bufferOffset = protectedApdu ? getSmBufferOffset(responseLength) : 0;
+        writeSelectResponse(buffer, bufferOffset, fid, fileSize, sfi);
+
+        return responseLength;
+    }
+
+    private short getSelectResponseLength(byte sfi) {
+        short length = 19;
+        if (sfi != FileSystem.NO_SFI) {
+            length += 3;
+        }
+        return length;
+    }
+
+    private void writeSelectResponse(byte[] buffer, short offset, short fid, short fileSize, byte sfi) {
+        short cursor = offset;
+        buffer[cursor++] = (byte) 0x6F;
+        short fciLengthIndex = cursor++;
+        buffer[cursor++] = (byte) 0x62;
+        short fcpLengthIndex = cursor++;
+
+        buffer[cursor++] = (byte) 0x82;
+        buffer[cursor++] = 0x02;
+        buffer[cursor++] = 0x01;
+        buffer[cursor++] = (byte) 0x1C;
+
+        buffer[cursor++] = (byte) 0x83;
+        buffer[cursor++] = 0x02;
+        buffer[cursor++] = (byte) (fid >> 8);
+        buffer[cursor++] = (byte) fid;
+
+        buffer[cursor++] = (byte) 0x80;
+        buffer[cursor++] = 0x02;
+        buffer[cursor++] = (byte) (fileSize >> 8);
+        buffer[cursor++] = (byte) fileSize;
+
+        if (sfi != FileSystem.NO_SFI) {
+            buffer[cursor++] = (byte) 0x88;
+            buffer[cursor++] = 0x01;
+            buffer[cursor++] = (byte) (sfi & 0x1F);
+        }
+
+        buffer[cursor++] = (byte) 0x8A;
+        buffer[cursor++] = 0x01;
+        buffer[cursor++] = (byte) 0x05;
+
+        buffer[fcpLengthIndex] = (byte) (cursor - fcpLengthIndex - 1);
+        buffer[fciLengthIndex] = (byte) (cursor - fciLengthIndex - 1);
     }
 
     /**
@@ -1482,44 +1550,76 @@ public class PassportApplet extends Applet implements ISO7816 {
      * @return length of the response APDU
      */
     private short processReadBinary(APDU apdu, short le, boolean protectedApdu) {
-        boolean cardAccessRead = (selectedFile == FileSystem.EF_CVCA_FID);
-        boolean openReadAllowed = isOpenReadFile(selectedFile);
-        if (!hasSecureMessagingSession() && !cardAccessRead && !openReadAllowed) {
-            ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
-        }
-
-        if (!hasFileSelected()) {
-            ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
-        }
-
         byte[] buffer = apdu.getBuffer();
         byte p1 = buffer[OFFSET_P1];
         byte p2 = buffer[OFFSET_P2];
 
-        short offset = Util.makeShort(p1, p2);
+        boolean usingSfi = (p1 & (byte) 0x80) != 0;
+        short fid = selectedFile;
+
+        if (usingSfi) {
+            byte sfi = (byte) ((p1 & 0xF8) >> 3);
+            fid = fileSystem.getFidForSfi(sfi);
+            if (fid == FileSystem.INVALID_FID) {
+                ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
+            }
+        } else {
+            if (!hasFileSelected()) {
+                ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+            }
+        }
+
+        boolean cardAccessRead = (fid == FileSystem.EF_CVCA_FID);
+        boolean openReadAllowed = isOpenReadFile(fid);
+        if (!hasSecureMessagingSession() && !cardAccessRead && !openReadAllowed) {
+            ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+
+        short offset;
+        if (usingSfi) {
+            offset = (short) (((p1 & 0x07) << 8) | (p2 & 0xFF));
+        } else {
+            offset = Util.makeShort(p1, p2);
+        }
+
+        byte[] file = fileSystem.getFile(fid);
+        if (file == null) {
+            ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
+        }
+
+        short fileSize = fileSystem.getFileSize(fid);
+        if (fileSize < 0 || offset < 0 || offset > fileSize) {
+            ISOException.throwIt(ISO7816.SW_WRONG_P1P2);
+        }
+
+        short available = (short) (fileSize - offset);
+        if (available < 0) {
+            ISOException.throwIt(ISO7816.SW_WRONG_P1P2);
+        }
+
+        if (protectedApdu && le > 0 && le > available && available <= (short) 0xFF) {
+            ISOException.throwIt((short) (ISO7816.SW_CORRECT_LENGTH_00 | (available & 0xFF)));
+        }
 
         short effectiveLe = le;
         if (!protectedApdu) {
             effectiveLe = apdu.setOutgoing();
         }
 
-        byte[] file = fileSystem.getFile(selectedFile);
-        if (file == null) {
-            ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
+        if (effectiveLe == 0 || effectiveLe > available) {
+            effectiveLe = available;
         }
 
-        short len;
-        short fileSize = fileSystem.getFileSize(selectedFile);
+        short responseLength = PassportUtil.min(effectiveLe, available);
+        short bufferOffset = protectedApdu ? getSmBufferOffset(responseLength) : 0;
+        short capacity = (short) (buffer.length - bufferOffset);
+        if (responseLength > capacity) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
 
-        len = PassportUtil.min((short) (buffer.length - 37),
-                (short) (fileSize - offset));
-        // FIXME: 37 magic
-        len = PassportUtil.min(len, (short) buffer.length);
-        len = PassportUtil.min(effectiveLe, len);
-        short bufferOffset = protectedApdu ? getSmBufferOffset(len) : 0;
-        Util.arrayCopyNonAtomic(file, offset, buffer, bufferOffset, len);
+        Util.arrayCopyNonAtomic(file, offset, buffer, bufferOffset, responseLength);
 
-        return len;
+        return responseLength;
     }
 
     private short processPaceGeneralAuthenticateStep1(APDU apdu, short lc) {
@@ -1879,12 +1979,71 @@ public class PassportApplet extends Applet implements ISO7816 {
         short readCount = (short) (buffer[ISO7816.OFFSET_LC] & 0xff);
         readCount = apdu.setIncomingAndReceive();
 
+        boolean wroteData = false;
         while (readCount > 0) {
             fileSystem.writeData(selectedFile, offset, buffer, OFFSET_CDATA,
                     readCount);
             offset += readCount;
             readCount = apdu.receiveBytes(ISO7816.OFFSET_CDATA);
+            wroteData = true;
         }
+
+        if (wroteData && selectedFile == FileSystem.EF_DG15_FID) {
+            enforceRsaActiveAuthenticationKey();
+        }
+    }
+
+    private void enforceRsaActiveAuthenticationKey() {
+        byte[] dg15 = fileSystem.getFile(FileSystem.EF_DG15_FID);
+        if (dg15 == null) {
+            return;
+        }
+        short fileSize = fileSystem.getFileSize(FileSystem.EF_DG15_FID);
+        if (fileSize <= 0 || fileSize > dg15.length) {
+            return;
+        }
+        if (fileSize < 2 || dg15[0] != (byte) 0x7F || dg15[1] != (byte) 0x49) {
+            return;
+        }
+
+        short[] cursorRef = new short[] { 2 };
+        short containerLength = readLength(dg15, cursorRef);
+        short containerEnd = (short) (cursorRef[0] + containerLength);
+        if (containerEnd > fileSize) {
+            return;
+        }
+
+        short cursor = cursorRef[0];
+        while (cursor < containerEnd) {
+            byte tag = dg15[cursor++];
+            cursorRef[0] = cursor;
+            short valueLength = readLength(dg15, cursorRef);
+            cursor = cursorRef[0];
+            short valueEnd = (short) (cursor + valueLength);
+            if (valueEnd > containerEnd) {
+                return;
+            }
+            if (tag == (byte) 0x06) {
+                if (!isRsaOid(dg15, cursor, valueLength)) {
+                    ISOException.throwIt(SW_WRONG_DATA);
+                }
+                return;
+            }
+            cursor = valueEnd;
+        }
+    }
+
+    private boolean isRsaOid(byte[] buffer, short offset, short length) {
+        if (length != (short) RSA_ENCRYPTION_OID.length) {
+            return false;
+        }
+        int base = offset & 0xFFFF;
+        for (int i = 0; i < RSA_ENCRYPTION_OID.length; i++) {
+            if (buffer[base + i] != RSA_ENCRYPTION_OID[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

@@ -84,7 +84,7 @@ final class PersonalizationSupport {
     KeyPair cscaPair = cscaGenerator.generateKeyPair();
 
     KeyPairGenerator docSignerGenerator = KeyPairGenerator.getInstance("RSA");
-    docSignerGenerator.initialize(1024, random);
+    docSignerGenerator.initialize(2048, random);
     KeyPair docSignerPair = docSignerGenerator.generateKeyPair();
 
     KeyPairGenerator aaGenerator = KeyPairGenerator.getInstance("RSA");
