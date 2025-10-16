@@ -82,6 +82,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import emu.PersonalizationSupport.SODArtifacts;
 
@@ -116,6 +117,7 @@ public class ReadDG1Main {
     boolean corruptDG2 = false;
     boolean largeDG2 = false;
     boolean attemptPace = false;
+    String pacePreference = null;
     Path trustStorePath = null;
     List<Path> trustMasterListPaths = new ArrayList<>();
     String trustStorePassword = null;
@@ -131,6 +133,7 @@ public class ReadDG1Main {
     String pin = null;
     String puk = null;
     String taDateOverride = null;
+    Boolean openComSodReads = null;
 
     List<String> argList = Arrays.asList(args);
     for (int i = 0; i < argList.size(); i++) {
@@ -139,6 +142,11 @@ public class ReadDG1Main {
         seed = true;
       } else if ("--attempt-pace".equals(arg)) {
         attemptPace = true;
+      } else if (arg.startsWith("--pace-prefer=")) {
+        pacePreference = arg.substring("--pace-prefer=".length());
+      } else if ("--pace-prefer".equals(arg)) {
+        i = advanceWithValue(argList, i, "--pace-prefer");
+        pacePreference = argList.get(i);
       } else if (arg.startsWith("--trust-store=")) {
         trustStorePath = Paths.get(arg.substring("--trust-store=".length()));
       } else if (arg.startsWith("--trust=")) {
@@ -219,6 +227,10 @@ public class ReadDG1Main {
       } else if ("--ta-date".equals(arg)) {
         i = advanceWithValue(argList, i, "--ta-date");
         taDateOverride = argList.get(i);
+      } else if ("--open-com-sod".equals(arg)) {
+        openComSodReads = Boolean.TRUE;
+      } else if ("--secure-com-sod".equals(arg)) {
+        openComSodReads = Boolean.FALSE;
       } else if (arg.startsWith("--out=")) {
         jsonOutPath = Paths.get(arg.substring("--out=".length()));
       } else if ("--out".equals(arg)) {
@@ -265,6 +277,15 @@ public class ReadDG1Main {
       }
     }
 
+    if (openComSodReads != null) {
+      byte[] toggle = new byte[]{(byte) (openComSodReads ? 0x01 : 0x00)};
+      int openSw = putData(ch, 0xDE, 0xFE, toggle,
+          openComSodReads ? "ENABLE open COM/SOD reads" : "DISABLE open COM/SOD reads");
+      if (openSw != 0x9000) {
+        throw new RuntimeException(String.format("Gagal mengatur kebijakan COM/SOD (SW=%04X).", openSw));
+      }
+    }
+
     byte[] currentDateTlv = encodeCurrentDate(terminalAuthDate);
     int dateSw = putData(ch, 0x00, PUT_DATA_P2_CURRENT_DATE, currentDateTlv, "PUT current date digits");
     if (dateSw != 0x9000) {
@@ -305,7 +326,7 @@ public class ReadDG1Main {
     BACKey bacKey = new BACKey(doc, dob, doe);
 
     PaceKeySelection paceKeySelection = buildPaceKeySelection(can, pin, puk, bacKey);
-    PaceOutcome paceOutcome = attemptPACE(svc, attemptPace, paceKeySelection, paceInfos);
+    PaceOutcome paceOutcome = attemptPACE(svc, attemptPace, paceKeySelection, paceInfos, pacePreference);
     report.session.paceAttempted = paceOutcome.attempted;
     report.session.paceEstablished = paceOutcome.established;
     if (paceOutcome.attempted) {
@@ -317,6 +338,7 @@ public class ReadDG1Main {
     if (!paceOutcome.established) {
       System.out.println("Falling back to BAC secure messaging.");
       svc.doBAC(bacKey);
+      logSecureMessagingTransition("BAC fallback", "BAC", "3DES");
     }
 
     System.out.printf("paceAttempted=%s, paceEstablished=%s%n", paceOutcome.attempted, paceOutcome.established);
@@ -422,7 +444,9 @@ public class ReadDG1Main {
       report.dataGroups.setDg2Metadata(dg2Metadata);
     }
     report.setActiveAuthentication(activeAuthOutcome, requireAA);
-    report.session.smMode = resolveSecureMessagingMode(paceOutcome, chipAuthOutcome);
+    String sessionSecureMessagingMode = resolveSecureMessagingMode(paceOutcome, chipAuthOutcome);
+    report.session.smMode = sessionSecureMessagingMode;
+    System.out.printf("Secure messaging final mode: %s%n", sessionSecureMessagingMode);
 
     if (jsonOutPath != null) {
       try {
@@ -700,10 +724,12 @@ public class ReadDG1Main {
       PassportService svc,
       boolean attemptPace,
       PaceKeySelection keySelection,
-      List<PACEInfo> paceInfos) {
+      List<PACEInfo> paceInfos,
+      String preference) {
     PaceOutcome outcome = new PaceOutcome();
     outcome.attempted = attemptPace;
     outcome.keySelection = keySelection;
+    outcome.preference = hasText(preference) ? preference : null;
     if (!attemptPace) {
       return outcome;
     }
@@ -711,7 +737,9 @@ public class ReadDG1Main {
       return outcome;
     }
     outcome.availableOptions = paceInfos.size();
-    outcome.selectedInfo = selectPreferredPACEInfo(paceInfos);
+    outcome.selectedInfo = selectPreferredPACEInfo(paceInfos, preference);
+    outcome.preferenceMatched = !hasText(preference)
+        || matchesPacePreference(outcome.selectedInfo, preference);
     if (keySelection == null) {
       outcome.failure = new IllegalStateException("PACE key not configured");
       return outcome;
@@ -734,6 +762,12 @@ public class ReadDG1Main {
           outcome.selectedInfo.getParameterId());
       outcome.result = result;
       outcome.established = result != null && result.getWrapper() != null;
+      if (outcome.established) {
+        logSecureMessagingTransition(
+            "PACE handshake",
+            "PACE",
+            describeCipher(result.getCipherAlg(), result.getKeyLength()));
+      }
     } catch (Exception e) {
       outcome.failure = e;
     }
@@ -747,6 +781,11 @@ public class ReadDG1Main {
     }
     if (outcome.keySelection != null && outcome.keySelection.error != null) {
       System.out.println("PACE key preparation failed: " + outcome.keySelection.error.getMessage());
+    }
+    if (hasText(outcome.preference)) {
+      System.out.printf("PACE preference: %s (matched=%s)%n",
+          outcome.preference,
+          outcome.preferenceMatched);
     }
     if (outcome.selectedInfo != null) {
       BigInteger parameterId = outcome.selectedInfo.getParameterId();
@@ -781,7 +820,20 @@ public class ReadDG1Main {
     }
   }
 
-  private static PACEInfo selectPreferredPACEInfo(List<PACEInfo> paceInfos) {
+  private static PACEInfo selectPreferredPACEInfo(List<PACEInfo> paceInfos, String preference) {
+    if (paceInfos == null || paceInfos.isEmpty()) {
+      return null;
+    }
+    if (hasText(preference)) {
+      List<PACEInfo> matches = paceInfos.stream()
+          .filter(info -> matchesPacePreference(info, preference))
+          .collect(Collectors.toList());
+      if (!matches.isEmpty()) {
+        return matches.stream()
+            .max(Comparator.comparingInt(ReadDG1Main::resolvePaceKeyLength))
+            .orElse(matches.get(0));
+      }
+    }
     return paceInfos.stream()
         .max(Comparator.comparingInt(ReadDG1Main::resolvePaceKeyLength))
         .orElse(paceInfos.get(0));
@@ -800,6 +852,60 @@ public class ReadDG1Main {
     } catch (Exception e) {
       return 0;
     }
+  }
+
+  private static boolean matchesPacePreference(PACEInfo info, String preference) {
+    if (info == null || !hasText(preference)) {
+      return false;
+    }
+    String trimmed = preference.trim();
+    if (trimmed.isEmpty()) {
+      return false;
+    }
+    String dotted = info.getObjectIdentifier();
+    if (trimmed.matches("[0-9.]+")) {
+      return dotted != null && dotted.equals(trimmed);
+    }
+    if (trimmed.regionMatches(true, 0, "oid:", 0, 4)) {
+      String value = trimmed.substring(4).trim();
+      return hasText(value) && dotted != null && dotted.equals(value);
+    }
+    String normalized = trimmed.toUpperCase(Locale.ROOT);
+    String display = info.getProtocolOIDString();
+    StringBuilder descriptor = new StringBuilder();
+    if (display != null) {
+      descriptor.append(display.toUpperCase(Locale.ROOT));
+    }
+    if (dotted != null) {
+      if (descriptor.length() > 0) {
+        descriptor.append(' ');
+      }
+      descriptor.append(dotted.toUpperCase(Locale.ROOT));
+    }
+    String combined = descriptor.toString();
+
+    if (normalized.equals("GM")) {
+      return combined.contains("GM");
+    }
+    if (normalized.equals("IM")) {
+      return combined.contains("IM");
+    }
+    if (normalized.contains("3DES") || normalized.contains("DESEDE")) {
+      return combined.contains("3DES") || combined.contains("DESEDE");
+    }
+    if (normalized.contains("AES256") || normalized.contains("AES-256")) {
+      return resolvePaceKeyLength(info) == 256;
+    }
+    if (normalized.contains("AES192") || normalized.contains("AES-192")) {
+      return resolvePaceKeyLength(info) == 192;
+    }
+    if (normalized.contains("AES128") || normalized.contains("AES-128") || normalized.equals("AES")) {
+      return resolvePaceKeyLength(info) == 128;
+    }
+    if (combined.contains(normalized)) {
+      return true;
+    }
+    return false;
   }
 
   private static AlgorithmParameterSpec buildPaceParameterSpec(PACEInfo info) {
@@ -912,6 +1018,10 @@ public class ReadDG1Main {
       if (outcome.established) {
         System.out.printf("Chip Authentication established (agreement=%s cipher=%s keyId=%s).%n",
             agreementAlg, cipherAlg, keyId != null ? keyId.toString(16) : "n/a");
+        logSecureMessagingTransition(
+            "Chip Authentication",
+            resolveSecureMessagingMode(null, outcome),
+            describeChipCipher(outcome.selectedInfo));
       } else {
         System.out.println("Chip Authentication handshake did not upgrade secure messaging.");
       }
@@ -1671,6 +1781,8 @@ public class ReadDG1Main {
     PACEInfo selectedInfo;
     PACEResult result;
     Exception failure;
+    String preference;
+    boolean preferenceMatched;
   }
 
   private static final class PaceKeySelection {
@@ -2177,6 +2289,59 @@ public class ReadDG1Main {
       return "JPEG2000";
     }
     return "type=" + imageDataType;
+  }
+
+  private static void logSecureMessagingTransition(String stage, String mode, String detail) {
+    if (!hasText(mode)) {
+      return;
+    }
+    StringBuilder message = new StringBuilder("Secure messaging → ");
+    message.append(mode);
+    if (hasText(detail)) {
+      message.append(' ').append('(').append(detail).append(')');
+    }
+    if (hasText(stage)) {
+      message.append(" after ").append(stage);
+    }
+    message.append('.');
+    System.out.println(message);
+  }
+
+  private static String describeCipher(String cipherAlg, int keyLength) {
+    if (!hasText(cipherAlg)) {
+      return null;
+    }
+    String normalized = cipherAlg.toUpperCase(Locale.ROOT);
+    if (normalized.contains("AES")) {
+      if (keyLength > 0) {
+        return "AES-" + keyLength;
+      }
+      return "AES";
+    }
+    if (normalized.contains("DESEDE") || normalized.contains("3DES")) {
+      return "3DES";
+    }
+    if (normalized.contains("DES")) {
+      return "DES";
+    }
+    return cipherAlg;
+  }
+
+  private static String describeChipCipher(ChipAuthenticationInfo info) {
+    if (info == null) {
+      return null;
+    }
+    String oid = info.getObjectIdentifier();
+    if (oid == null) {
+      return null;
+    }
+    try {
+      String cipher = ChipAuthenticationInfo.toCipherAlgorithm(oid);
+      int keyLength = ChipAuthenticationInfo.toKeyLength(oid);
+      return describeCipher(cipher, keyLength);
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   private static String resolveSecureMessagingMode(PaceOutcome paceOutcome, ChipAuthOutcome chipOutcome) {
