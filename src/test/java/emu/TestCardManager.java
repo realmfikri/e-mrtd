@@ -135,7 +135,7 @@ final class TestCardManager {
 
     byte[] mrzSeed = buildMrzSeed(DEFAULT_DOC, DEFAULT_DOB, DEFAULT_DOE);
     putData(channel, 0x00, 0x62, mrzSeed);
-    seedActiveAuthenticationKey(channel, artifacts.docSignerKeyPair.getPrivate());
+    seedActiveAuthenticationKey(channel, artifacts.aaKeyPair.getPrivate());
 
     putData(channel, 0xDE, 0xAF, new byte[0]);
     putData(channel, 0xDE, 0xAD, new byte[0]);

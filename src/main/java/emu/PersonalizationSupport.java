@@ -86,6 +86,10 @@ final class PersonalizationSupport {
     KeyPairGenerator docSignerGenerator = KeyPairGenerator.getInstance("RSA");
     docSignerGenerator.initialize(1024, random);
     KeyPair docSignerPair = docSignerGenerator.generateKeyPair();
+
+    KeyPairGenerator aaGenerator = KeyPairGenerator.getInstance("RSA");
+    aaGenerator.initialize(1024, random);
+    KeyPair aaKeyPair = aaGenerator.generateKeyPair();
     KeyPairGenerator ecGenerator = KeyPairGenerator.getInstance("EC");
     ecGenerator.initialize(new ECGenParameterSpec("secp256r1"));
     KeyPair chipAuthKeyPair = ecGenerator.generateKeyPair();
@@ -139,7 +143,7 @@ final class PersonalizationSupport {
     DG2File dg2File = DG2File.createISO19794DG2File(Collections.singletonList(faceInfo));
     byte[] dg2Bytes = dg2File.getEncoded();
 
-    DG15File dg15File = new DG15File(docSignerPair.getPublic());
+    DG15File dg15File = new DG15File(aaKeyPair.getPublic());
     byte[] dg15Bytes = dg15File.getEncoded();
 
     PACEInfo paceInfo = new PACEInfo(SecurityInfo.ID_PACE_ECDH_GM_AES_CBC_CMAC_128, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1);
@@ -182,6 +186,7 @@ final class PersonalizationSupport {
         dg14Bytes,
         cardAccessBytes,
         chipAuthKeyPair,
+        aaKeyPair,
         docSignerPair,
         cscaCert,
         docSignerCert);
@@ -403,6 +408,7 @@ final class PersonalizationSupport {
     final byte[] dg14Bytes;
     final byte[] cardAccessBytes;
     final KeyPair chipAuthKeyPair;
+    final KeyPair aaKeyPair;
     final KeyPair docSignerKeyPair;
     final X509Certificate cscaCert;
     final X509Certificate docSignerCert;
@@ -415,6 +421,7 @@ final class PersonalizationSupport {
                  byte[] dg14Bytes,
                  byte[] cardAccessBytes,
                  KeyPair chipAuthKeyPair,
+                 KeyPair aaKeyPair,
                  KeyPair docSignerKeyPair,
                  X509Certificate cscaCert,
                  X509Certificate docSignerCert) {
@@ -426,6 +433,7 @@ final class PersonalizationSupport {
       this.dg14Bytes = dg14Bytes;
       this.cardAccessBytes = cardAccessBytes;
       this.chipAuthKeyPair = chipAuthKeyPair;
+      this.aaKeyPair = aaKeyPair;
       this.docSignerKeyPair = docSignerKeyPair;
       this.cscaCert = cscaCert;
       this.docSignerCert = docSignerCert;
