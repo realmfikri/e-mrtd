@@ -96,6 +96,25 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
 - Expect the log line `PUT PACE secrets TLV → SW=9000`. A status word `6A80` means the host is still emitting the old, nested
   TLV format—run `mvn -q -DskipTests package` (or `mvn clean package`) to rebuild the CLI before retrying.
 
+### Prefer a Specific PACE Profile
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --attempt-pace --pace-prefer=IM'
+```
+- `--pace-prefer` accepts friendly labels (`GM`, `IM`, `3DES`, `AES128`, `AES192`, `AES256`) or a dotted OID to force a specific
+  PACEInfo entry when multiple mappings are advertised in EF.CardAccess.
+- The console reports whether the preference was matched and highlights the negotiated mapping and cipher (`Secure messaging →
+  PACE (AES-128) after PACE handshake`).
+
+### Toggle EF.COM/EF.SOD Open Reads
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
+  -Dexec.args='--seed --open-com-sod'
+```
+- `--open-com-sod` enables the developer PUT DATA switch that allows EF.COM and EF.SOD to be read without secure messaging once
+  the chip is locked, mimicking the policy of many production passports.
+- Use `--secure-com-sod` to return to the default "secure-only" behaviour in the same run.
+
 ### JSON Session Report Export
 ```bash
 mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
@@ -108,6 +127,10 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
   - `aa`: Active Authentication toggle (CLI/attempt), card support, key algorithm, and verification result.
   - `dg`: data groups read during the run plus DG3/DG4 accessibility and DG2 face metadata (dimensions, MIME, size).
 - `--trust` is accepted as an alias of `--trust-store`, and `--aa` is an alias of `--require-aa` when scripting flows.
+- Add multiple Master List inputs with the repeatable `--trust-ml` flag to point passive authentication at additional CSCA
+  bundles.
+- The run now prints a transition log whenever secure messaging upgrades (BAC → PACE → CA) plus a final summary line showing the
+  active mode.
 
 ### BAC Fallback after Incorrect CAN
 ```bash
@@ -191,7 +214,9 @@ The JUnit suite provisions a fresh in-memory card for every test and verifies:
 | BAC Fallback | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --can=000000 --doc=123456789 --dob=750101 --doe=250101' ``` | Illustrates automatic BAC fallback after a failed CAN-based PACE attempt. |
 | Active Authentication (RSA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --require-aa' ``` | Forces a DG15-backed RSA AA verification; check for both `PUT AA ... → SW=9000` lines during seeding before the signature test. |
 | JSON Session Report | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --out target/session-report.json' ``` | Emits `target/session-report.json` with session, PA, AA, and DG summaries for CI ingestion. |
-| TA Gating (no credentials) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --pace-cam' ``` | Demonstrates that DG3/DG4 remain inaccessible (`SW=6985`) when TA is skipped, even after PACE→CA. |
+| PACE Profile Preference | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --pace-prefer=IM' ``` | Forces the integrated-mapping profile when both GM and IM are advertised; logs whether the preference was honoured. |
+| Open EF.COM/EF.SOD Policy | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --open-com-sod' ``` | Enables the open-read toggle so COM/SOD are accessible without secure messaging after LOCKED. |
+| TA Gating (no credentials) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace' ``` | Shows DG3/DG4 remain blocked (`SW=6985`) when no CVC/terminal key is supplied, even after PACE→CA. |
 | Terminal Authentication (DG3/DG4) | ```bash mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain && mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key' ``` | Performs PACE→CA→TA with the demo chain and reports DG3/DG4 accessibility. |
 
 ### Lifecycle State Controls
