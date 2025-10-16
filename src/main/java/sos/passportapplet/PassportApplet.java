@@ -71,7 +71,9 @@ import org.jmrtd.protocol.PACEProtocol;
 
 import sos.passportapplet.pace.PaceContext;
 import sos.passportapplet.pace.PaceSecrets;
+import sos.passportapplet.pace.SecureMessaging;
 import sos.passportapplet.pace.SecureMessagingAES;
+import sos.passportapplet.pace.SecureMessagingDES;
 
 // API for setATRHistBytes - requires Global Platform API gp211.jar
 // Comment out the following line if API not available.
@@ -232,7 +234,9 @@ public class PassportApplet extends Applet implements ISO7816 {
 
     private final sos.passportapplet.pace.PaceContext paceContext;
 
-    private final SecureMessagingAES paceSecureMessaging;
+    private final SecureMessagingAES paceSecureMessagingAes;
+    private final SecureMessagingDES paceSecureMessagingDes;
+    private SecureMessaging paceSecureMessaging;
     private String chipAuthProtocolOid;
     private BigInteger chipAuthKeyId;
     private String chipAuthCipherAlgorithm;
@@ -292,7 +296,9 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         paceSecrets = new PaceSecrets();
         paceContext = new PaceContext();
-        paceSecureMessaging = new SecureMessagingAES();
+        paceSecureMessagingAes = new SecureMessagingAES();
+        paceSecureMessagingDes = new SecureMessagingDES();
+        paceSecureMessaging = paceSecureMessagingAes;
     }
 
     /**
@@ -513,6 +519,27 @@ public class PassportApplet extends Applet implements ISO7816 {
             return paceSecureMessaging.getApduBufferOffset(length);
         }
         return 0;
+    }
+
+    private SecureMessaging selectPaceSecureMessaging(String cipherAlgorithm) {
+        if (cipherAlgorithm != null && cipherAlgorithm.startsWith("DESede")) {
+            return paceSecureMessagingDes;
+        }
+        return paceSecureMessagingAes;
+    }
+
+    private void resetPaceSecureMessagingCounters(int blockSize) {
+        if (paceSSC == null || paceSSC.length != blockSize) {
+            paceSSC = new byte[blockSize];
+        } else {
+            Arrays.fill(paceSSC, (byte) 0);
+        }
+        if (paceExpectedSSC == null || paceExpectedSSC.length != blockSize) {
+            paceExpectedSSC = new byte[blockSize];
+        } else {
+            Arrays.fill(paceExpectedSSC, (byte) 0);
+        }
+        paceContext.setPaceSendSequenceCounter(paceSSC);
     }
 
     private void assertPaceSecureMessagingCounter() {
@@ -786,9 +813,6 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         boolean paceActive = hasPaceEstablished();
         if (paceActive) {
-            if (resolvedCipher != null && resolvedCipher.startsWith("DESede")) {
-                ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
-            }
             crypto.configureChipAuthentication(resolvedCipher, resolvedKeyLength);
         } else {
             if (resolvedCipher != null && resolvedCipher.startsWith("AES")) {
@@ -805,38 +829,30 @@ public class PassportApplet extends Applet implements ISO7816 {
     }
 
     private void applyChipAuthenticationSecureMessaging() {
-        if (!crypto.hasPendingAesKeys()) {
+        if (!crypto.hasPendingSmKeys()) {
             return;
         }
 
-        byte[] macKeyBytes = crypto.getPendingAesMacKey();
-        byte[] encKeyBytes = crypto.getPendingAesEncKey();
-        if (macKeyBytes == null || encKeyBytes == null) {
-            crypto.clearPendingAesKeys();
+        byte[] macKeyBytes = crypto.getPendingSmMacKey();
+        byte[] encKeyBytes = crypto.getPendingSmEncKey();
+        String cipherAlgorithm = crypto.getPendingSmCipherAlgorithm();
+        int keyLengthBits = crypto.getPendingSmKeyLength();
+        if (macKeyBytes == null || encKeyBytes == null || cipherAlgorithm == null) {
+            crypto.clearPendingSmKeys();
             ISOException.throwIt(SW_INTERNAL_ERROR);
-        }
-
-        String cipherAlgorithm = crypto.getChipAuthCipherAlgorithm();
-        if (cipherAlgorithm == null || !cipherAlgorithm.startsWith("AES")) {
-            crypto.clearPendingAesKeys();
-            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
         }
 
         SecretKey macKey = new SecretKeySpec(macKeyBytes, cipherAlgorithm);
         SecretKey encKey = new SecretKeySpec(encKeyBytes, cipherAlgorithm);
+        SecureMessaging helper = selectPaceSecureMessaging(cipherAlgorithm);
+        paceSecureMessaging = helper;
         paceSecureMessaging.setKeys(macKey, encKey);
         paceContext.setSessionMacKey(macKey);
         paceContext.setSessionEncKey(encKey);
         paceContext.setCipherAlgorithm(cipherAlgorithm);
-        paceContext.setKeyLength(crypto.getChipAuthKeyLength());
-        if (paceSSC != null) {
-            Arrays.fill(paceSSC, (byte) 0);
-        }
-        if (paceExpectedSSC != null) {
-            Arrays.fill(paceExpectedSSC, (byte) 0);
-        }
-        paceContext.setPaceSendSequenceCounter(paceSSC);
-        crypto.clearPendingAesKeys();
+        paceContext.setKeyLength(keyLengthBits);
+        resetPaceSecureMessagingCounters(helper.getBlockSize());
+        crypto.clearPendingSmKeys();
         System.out.println("Chip Authentication secure messaging upgraded to " + cipherAlgorithm);
     }
 
@@ -904,6 +920,13 @@ public class PassportApplet extends Applet implements ISO7816 {
             buffer[offset++] = (byte) (length & 0xFF);
         }
         return offset;
+    }
+
+    private String resolvePaceCipherTransformation(String cipherAlg) {
+        if (cipherAlg != null && cipherAlg.startsWith("DESede")) {
+            return "DESede/CBC/NoPadding";
+        }
+        return "AES/CBC/NoPadding";
     }
 
     private String inferMacAlgorithm(String cipherAlg) throws GeneralSecurityException {
@@ -1509,20 +1532,22 @@ public class PassportApplet extends Applet implements ISO7816 {
             return 0;
         }
 
-        byte[] nonce = new byte[16];
-        randomData.generateData(nonce, (short) 0, (short) nonce.length);
-
         byte[] encryptedNonce;
         try {
-            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/CBC/NoPadding");
-            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, staticKey, new IvParameterSpec(new byte[16]));
+            String cipherAlgorithm = paceContext.getCipherAlgorithm();
+            String transformation = resolvePaceCipherTransformation(cipherAlgorithm);
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance(transformation, BouncyCastleProvider.PROVIDER_NAME);
+            int blockSize = cipher.getBlockSize();
+            byte[] nonce = new byte[blockSize];
+            randomData.generateData(nonce, (short) 0, (short) nonce.length);
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, staticKey, new IvParameterSpec(new byte[blockSize]));
             encryptedNonce = cipher.doFinal(nonce);
+            paceContext.setNonceS(nonce);
         } catch (GeneralSecurityException e) {
             ISOException.throwIt(SW_INTERNAL_ERROR);
             return 0;
         }
 
-        paceContext.setNonceS(nonce);
         paceContext.setStaticKey(staticKey);
         paceContext.setStep(PaceContext.Step.NONCE_SENT);
 
@@ -1542,13 +1567,12 @@ public class PassportApplet extends Applet implements ISO7816 {
         if (lc <= 0) {
             ISOException.throwIt(SW_WRONG_LENGTH);
         }
-        if (paceContext.getMappingType() != MappingType.GM) {
-            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
-        }
+        MappingType mappingType = paceContext.getMappingType();
         AlgorithmParameterSpec staticParams = paceContext.getParameterSpec();
-        if (!(staticParams instanceof java.security.spec.ECParameterSpec)) {
-            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+        if (mappingType == null || staticParams == null) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
+
         byte[] buffer = apdu.getBuffer();
         short cursor = dataOffset;
         if (buffer[cursor++] != (byte) 0x7C) {
@@ -1562,53 +1586,103 @@ public class PassportApplet extends Applet implements ISO7816 {
             ISOException.throwIt(SW_WRONG_DATA);
         }
         cursorHolder[0] = cursor;
-        short mappingDataLength = readLength(buffer, cursorHolder);
+        short valueLength = readLength(buffer, cursorHolder);
         cursor = cursorHolder[0];
-        if ((short) (cursor + mappingDataLength) > containerEnd) {
+        if ((short) (cursor + valueLength) > containerEnd) {
             ISOException.throwIt(SW_WRONG_LENGTH);
         }
-        byte[] mappingData = new byte[mappingDataLength];
-        Util.arrayCopy(buffer, cursor, mappingData, (short) 0, mappingDataLength);
-        cursor += mappingDataLength;
-        if (cursor != containerEnd) {
-            ISOException.throwIt(SW_WRONG_DATA);
-        }
 
-        try {
-            PublicKey mappingTerminalPublicKey = PACEProtocol.decodePublicKeyFromSmartCard(mappingData, staticParams);
-            String agreementAlg = paceContext.getAgreementAlgorithm();
-            if (!"ECDH".equalsIgnoreCase(agreementAlg)) {
+        switch (mappingType) {
+        case GM: {
+            if (!(staticParams instanceof java.security.spec.ECParameterSpec)) {
                 ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
             }
-            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
-            keyPairGenerator.initialize(staticParams);
-            KeyPair mappingKeyPair = keyPairGenerator.generateKeyPair();
+            byte[] mappingData = new byte[valueLength];
+            Util.arrayCopy(buffer, cursor, mappingData, (short) 0, valueLength);
+            cursor += valueLength;
+            if (cursor != containerEnd) {
+                ISOException.throwIt(SW_WRONG_DATA);
+            }
 
-            ECPublicKey terminalPublic = (ECPublicKey) mappingTerminalPublicKey;
-            ECPrivateKey chipPrivate = (ECPrivateKey) mappingKeyPair.getPrivate();
-            java.security.spec.ECParameterSpec ecSpec = terminalPublic.getParams();
-            java.security.spec.ECPoint sharedPoint = org.jmrtd.Util.multiply(chipPrivate.getS(), terminalPublic.getW(), ecSpec);
+            try {
+                PublicKey mappingTerminalPublicKey = PACEProtocol.decodePublicKeyFromSmartCard(mappingData, staticParams);
+                String agreementAlg = paceContext.getAgreementAlgorithm();
+                if (!"ECDH".equalsIgnoreCase(agreementAlg)) {
+                    ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+                }
+                KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
+                keyPairGenerator.initialize(staticParams);
+                KeyPair mappingKeyPair = keyPairGenerator.generateKeyPair();
 
-            AlgorithmParameterSpec ephemeralParams = PACEProtocol.mapNonceGMWithECDH(paceContext.getNonceS(), sharedPoint, ecSpec);
+                ECPublicKey terminalPublic = (ECPublicKey) mappingTerminalPublicKey;
+                ECPrivateKey chipPrivate = (ECPrivateKey) mappingKeyPair.getPrivate();
+                java.security.spec.ECParameterSpec ecSpec = terminalPublic.getParams();
+                java.security.spec.ECPoint sharedPoint = org.jmrtd.Util.multiply(chipPrivate.getS(), terminalPublic.getW(), ecSpec);
 
-            paceContext.setMappingKeyPair(mappingKeyPair);
-            paceContext.setEphemeralParameterSpec(ephemeralParams);
-            paceContext.setStep(PaceContext.Step.MAPPED);
+                AlgorithmParameterSpec ephemeralParams = PACEProtocol.mapNonceGMWithECDH(paceContext.getNonceS(), sharedPoint,
+                        ecSpec);
 
-            ECPublicKey chipPublic = (ECPublicKey) mappingKeyPair.getPublic();
-            byte[] encodedPoint = org.jmrtd.Util.ecPoint2OS(chipPublic.getW(), ecSpec.getCurve().getField().getFieldSize());
+                paceContext.setMappingKeyPair(mappingKeyPair);
+                paceContext.setEphemeralParameterSpec(ephemeralParams);
+                paceContext.setStep(PaceContext.Step.MAPPED);
 
-            short offset = 0;
-            buffer[offset++] = (byte) 0x7C;
-            offset = writeLength(buffer, offset, (short) (2 + encodedPoint.length));
-            buffer[offset++] = (byte) 0x82;
-            offset = writeLength(buffer, offset, (short) encodedPoint.length);
-            Util.arrayCopyNonAtomic(encodedPoint, (short) 0, buffer, offset, (short) encodedPoint.length);
-            offset += encodedPoint.length;
+                ECPublicKey chipPublic = (ECPublicKey) mappingKeyPair.getPublic();
+                byte[] encodedPoint = org.jmrtd.Util.ecPoint2OS(chipPublic.getW(), ecSpec.getCurve().getField().getFieldSize());
 
-            return offset;
-        } catch (GeneralSecurityException e) {
-            ISOException.throwIt(SW_INTERNAL_ERROR);
+                short offset = 0;
+                buffer[offset++] = (byte) 0x7C;
+                offset = writeLength(buffer, offset, (short) (2 + encodedPoint.length));
+                buffer[offset++] = (byte) 0x82;
+                offset = writeLength(buffer, offset, (short) encodedPoint.length);
+                Util.arrayCopyNonAtomic(encodedPoint, (short) 0, buffer, offset, (short) encodedPoint.length);
+                offset += encodedPoint.length;
+
+                return offset;
+            } catch (GeneralSecurityException e) {
+                ISOException.throwIt(SW_INTERNAL_ERROR);
+                return 0;
+            }
+        }
+        case IM: {
+            if (!(staticParams instanceof java.security.spec.ECParameterSpec)) {
+                ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+            }
+            byte[] pcdNonce = new byte[valueLength];
+            Util.arrayCopy(buffer, cursor, pcdNonce, (short) 0, valueLength);
+            cursor += valueLength;
+            if (cursor < containerEnd) {
+                if (buffer[cursor++] != (byte) 0x82) {
+                    ISOException.throwIt(SW_WRONG_DATA);
+                }
+                cursorHolder[0] = cursor;
+                short paddingLength = readLength(buffer, cursorHolder);
+                cursor = cursorHolder[0];
+                if (paddingLength != 0 || cursor != containerEnd) {
+                    ISOException.throwIt(SW_WRONG_DATA);
+                }
+            } else if (cursor != containerEnd) {
+                ISOException.throwIt(SW_WRONG_DATA);
+            }
+
+            try {
+                AlgorithmParameterSpec ephemeralParams = PACEProtocol.mapNonceIMWithECDH(paceContext.getNonceS(), pcdNonce,
+                        paceContext.getCipherAlgorithm(), (java.security.spec.ECParameterSpec) staticParams);
+                paceContext.setEphemeralParameterSpec(ephemeralParams);
+                paceContext.setStep(PaceContext.Step.MAPPED);
+
+                short offset = 0;
+                buffer[offset++] = (byte) 0x7C;
+                offset = writeLength(buffer, offset, (short) 2);
+                buffer[offset++] = (byte) 0x82;
+                buffer[offset++] = 0x00;
+                return offset;
+            } catch (GeneralSecurityException e) {
+                ISOException.throwIt(SW_INTERNAL_ERROR);
+                return 0;
+            }
+        }
+        default:
+            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
             return 0;
         }
     }
@@ -1616,9 +1690,6 @@ public class PassportApplet extends Applet implements ISO7816 {
     private short processPaceGeneralAuthenticateStep3(APDU apdu, short dataOffset, short lc) {
         if (lc <= 0) {
             ISOException.throwIt(SW_WRONG_LENGTH);
-        }
-        if (paceContext.getMappingType() != MappingType.GM) {
-            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
         }
         AlgorithmParameterSpec ephemeralParams = paceContext.getEphemeralParameterSpec();
         if (ephemeralParams == null || !(ephemeralParams instanceof java.security.spec.ECParameterSpec)) {
@@ -1694,8 +1765,8 @@ public class PassportApplet extends Applet implements ISO7816 {
         if (lc <= 0) {
             ISOException.throwIt(SW_WRONG_LENGTH);
         }
-        if (paceContext.getMappingType() != MappingType.GM || paceContext.getSharedSecret() == null
-                || paceContext.getChipEphemeralKeyPair() == null || paceContext.getTerminalPublicKey() == null) {
+        if (paceContext.getSharedSecret() == null || paceContext.getChipEphemeralKeyPair() == null
+                || paceContext.getTerminalPublicKey() == null) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
 
@@ -1750,14 +1821,16 @@ public class PassportApplet extends Applet implements ISO7816 {
             Util.arrayCopyNonAtomic(chipTokenFull, (short) 0, chipToken, (short) 0, (short) chipToken.length);
             System.out.println("PACE Step4 chip token generated.");
 
+            SecureMessaging helper = selectPaceSecureMessaging(cipherAlg);
+            paceSecureMessaging = helper;
             paceSecureMessaging.setKeys(macKey, encKey);
             paceContext.setSessionEncKey(encKey);
             paceContext.setSessionMacKey(macKey);
-            Arrays.fill(paceSSC, (byte) 0);
-            Arrays.fill(paceExpectedSSC, (byte) 0);
-            paceContext.setPaceSendSequenceCounter(paceSSC);
-            paceContext.setStep(PaceContext.Step.TOKENS_VERIFIED);
+            paceContext.setCipherAlgorithm(cipherAlg);
+            paceContext.setKeyLength(keyLength);
+            resetPaceSecureMessagingCounters(helper.getBlockSize());
             paceContext.setSharedSecret(Arrays.copyOf(sharedSecret, sharedSecret.length));
+            paceContext.setStep(PaceContext.Step.TOKENS_VERIFIED);
             volatileState[0] |= PACE_ESTABLISHED;
 
             short offset = 0;

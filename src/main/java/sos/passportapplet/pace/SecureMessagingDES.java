@@ -17,15 +17,11 @@ import java.util.Arrays;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 /**
- * AES/CBC + AES-CMAC secure messaging utilities for the PACE profile.
- *
- * <p>This helper mirrors the structure defined in ICAO Doc 9303,
- * Part 11, Annex E. It is only used in the simulator (jCardSim)
- * and therefore leverages the JCE APIs.</p>
+ * DESede/CBC + ISO 9797-1 Alg3 secure messaging helper for PACE 3DES profiles.
  */
-public final class SecureMessagingAES implements SecureMessaging {
+public final class SecureMessagingDES implements SecureMessaging {
 
-  private static final int BLOCK_SIZE = 16;
+  private static final int BLOCK_SIZE = 8;
   private static final int MAC_LENGTH = 8;
 
   private final Cipher cipher;
@@ -40,13 +36,13 @@ public final class SecureMessagingAES implements SecureMessaging {
     }
   }
 
-  public SecureMessagingAES() {
+  public SecureMessagingDES() {
     try {
-      cipher = Cipher.getInstance("AES/CBC/NoPadding", BouncyCastleProvider.PROVIDER_NAME);
-      ivCipher = Cipher.getInstance("AES/ECB/NoPadding", BouncyCastleProvider.PROVIDER_NAME);
-      mac = Mac.getInstance("AESCMAC", BouncyCastleProvider.PROVIDER_NAME);
+      cipher = Cipher.getInstance("DESede/CBC/NoPadding", BouncyCastleProvider.PROVIDER_NAME);
+      ivCipher = Cipher.getInstance("DESede/ECB/NoPadding", BouncyCastleProvider.PROVIDER_NAME);
+      mac = Mac.getInstance("ISO9797ALG3WITHISO7816-4PADDING", BouncyCastleProvider.PROVIDER_NAME);
     } catch (GeneralSecurityException e) {
-      throw new IllegalStateException("Unable to initialise AES secure messaging primitives", e);
+      throw new IllegalStateException("Unable to initialise DES secure messaging primitives", e);
     }
   }
 
@@ -120,7 +116,7 @@ public final class SecureMessagingAES implements SecureMessaging {
     if (macValueOffset < 0 || macLength <= 0) {
       ISOException.throwIt(ISO7816.SW_DATA_INVALID);
     }
-    if (macLength != MAC_LENGTH && macLength != BLOCK_SIZE) {
+    if (macLength != MAC_LENGTH) {
       ISOException.throwIt(ISO7816.SW_DATA_INVALID);
     }
 
@@ -165,7 +161,6 @@ public final class SecureMessagingAES implements SecureMessaging {
       le = decodeLe(buf, valueOffset, valueLength);
     }
 
-    // wipe trailing bytes so that remaining TLVs do not leak into subsequent processing
     short wipeOffset = (short) (ISO7816.OFFSET_CDATA + plaintextLc);
     short wipeLength = (short) (lc - plaintextLc);
     if (wipeLength > 0) {
@@ -298,7 +293,7 @@ public final class SecureMessagingAES implements SecureMessaging {
       mac.init(macKey);
       return mac.doFinal(input);
     } catch (GeneralSecurityException e) {
-      throw new IllegalStateException("Failed to compute AES CMAC", e);
+      throw new IllegalStateException("Failed to compute DES MAC", e);
     }
   }
 
@@ -307,7 +302,7 @@ public final class SecureMessagingAES implements SecureMessaging {
       cipher.init(Cipher.ENCRYPT_MODE, encKey, new IvParameterSpec(iv));
       return cipher.doFinal(paddedPlaintext);
     } catch (GeneralSecurityException e) {
-      throw new IllegalStateException("AES encrypt failed", e);
+      throw new IllegalStateException("DES encrypt failed", e);
     }
   }
 
@@ -316,7 +311,7 @@ public final class SecureMessagingAES implements SecureMessaging {
       cipher.init(Cipher.DECRYPT_MODE, encKey, new IvParameterSpec(iv));
       return cipher.doFinal(buf, offset, length);
     } catch (GeneralSecurityException e) {
-      throw new IllegalStateException("AES decrypt failed", e);
+      throw new IllegalStateException("DES decrypt failed", e);
     }
   }
 
@@ -365,7 +360,7 @@ public final class SecureMessagingAES implements SecureMessaging {
       ivCipher.init(Cipher.ENCRYPT_MODE, encKey);
       return ivCipher.doFinal(ssc);
     } catch (GeneralSecurityException e) {
-      throw new IllegalStateException("Failed to derive PACE IV", e);
+      throw new IllegalStateException("Failed to derive DES PACE IV", e);
     }
   }
 

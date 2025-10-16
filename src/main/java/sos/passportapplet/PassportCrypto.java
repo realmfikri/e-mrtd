@@ -73,9 +73,11 @@ public class PassportCrypto {
     private byte chipAuthMode = CHIP_AUTH_MODE_3DES;
     private String chipAuthCipherAlgorithm = "DESede";
     private int chipAuthKeyLengthBits = 128;
-    private boolean pendingAesKeys;
-    private byte[] pendingAesMacKey;
-    private byte[] pendingAesEncKey;
+    private boolean pendingSmKeys;
+    private byte[] pendingSmMacKey;
+    private byte[] pendingSmEncKey;
+    private String pendingSmCipherAlgorithm;
+    private int pendingSmKeyLengthBits;
 
     public static byte[] PAD_DATA = { (byte) 0x80, 0, 0, 0, 0, 0, 0, 0 };
 
@@ -102,6 +104,7 @@ public class PassportCrypto {
     }
 
     public void configureChipAuthentication(String cipherAlgorithm, int keyLengthBits) {
+        clearPendingSmKeys();
         if (cipherAlgorithm != null && cipherAlgorithm.startsWith("AES")) {
             chipAuthMode = CHIP_AUTH_MODE_AES;
             chipAuthCipherAlgorithm = cipherAlgorithm;
@@ -113,16 +116,24 @@ public class PassportCrypto {
         }
     }
 
-    public boolean hasPendingAesKeys() {
-        return pendingAesKeys;
+    public boolean hasPendingSmKeys() {
+        return pendingSmKeys;
     }
 
-    public byte[] getPendingAesMacKey() {
-        return pendingAesMacKey;
+    public byte[] getPendingSmMacKey() {
+        return pendingSmMacKey;
     }
 
-    public byte[] getPendingAesEncKey() {
-        return pendingAesEncKey;
+    public byte[] getPendingSmEncKey() {
+        return pendingSmEncKey;
+    }
+
+    public String getPendingSmCipherAlgorithm() {
+        return pendingSmCipherAlgorithm;
+    }
+
+    public int getPendingSmKeyLength() {
+        return pendingSmKeyLengthBits;
     }
 
     public String getChipAuthCipherAlgorithm() {
@@ -133,16 +144,18 @@ public class PassportCrypto {
         return chipAuthKeyLengthBits;
     }
 
-    public void clearPendingAesKeys() {
-        pendingAesKeys = false;
-        if (pendingAesMacKey != null) {
-            Arrays.fill(pendingAesMacKey, (byte) 0x00);
-            pendingAesMacKey = null;
+    public void clearPendingSmKeys() {
+        pendingSmKeys = false;
+        if (pendingSmMacKey != null) {
+            Arrays.fill(pendingSmMacKey, (byte) 0x00);
+            pendingSmMacKey = null;
         }
-        if (pendingAesEncKey != null) {
-            Arrays.fill(pendingAesEncKey, (byte) 0x00);
-            pendingAesEncKey = null;
+        if (pendingSmEncKey != null) {
+            Arrays.fill(pendingSmEncKey, (byte) 0x00);
+            pendingSmEncKey = null;
         }
+        pendingSmCipherAlgorithm = null;
+        pendingSmKeyLengthBits = 0;
     }
 
     public void createMacFinal(byte[] msg, short msg_offset, short msg_len,
@@ -632,7 +645,7 @@ public class PassportCrypto {
      */
     public boolean authenticateChip(byte[] pubData, short offset, short length) {
         try {
-            clearPendingAesKeys();
+            clearPendingSmKeys();
             // Verify public key first. i.e. see if the data is correct and
             // makes up a valid
             // EC public key.
@@ -654,9 +667,11 @@ public class PassportCrypto {
                         org.jmrtd.Util.MAC_MODE);
                 SecretKey encKey = org.jmrtd.Util.deriveKey(secret, chipAuthCipherAlgorithm, chipAuthKeyLengthBits,
                         org.jmrtd.Util.ENC_MODE);
-                pendingAesMacKey = macKey.getEncoded();
-                pendingAesEncKey = encKey.getEncoded();
-                pendingAesKeys = true;
+                pendingSmMacKey = macKey.getEncoded();
+                pendingSmEncKey = encKey.getEncoded();
+                pendingSmCipherAlgorithm = chipAuthCipherAlgorithm;
+                pendingSmKeyLengthBits = chipAuthKeyLengthBits;
+                pendingSmKeys = true;
                 Arrays.fill(secret, (byte) 0x00);
                 Util.arrayFillNonAtomic(pubData, secOffset, secLength, (byte) 0x00);
                 return true;
@@ -671,17 +686,24 @@ public class PassportCrypto {
                     (short) 0, PassportApplet.KEY_LENGTH);
             Util.arrayCopyNonAtomic(pubData, encKeyOffset, keyStore.tmpKeys,
                     PassportApplet.KEY_LENGTH, PassportApplet.KEY_LENGTH);
+            pendingSmMacKey = new byte[PassportApplet.KEY_LENGTH];
+            pendingSmEncKey = new byte[PassportApplet.KEY_LENGTH];
+            Util.arrayCopyNonAtomic(pubData, macKeyOffset, pendingSmMacKey, (short) 0, PassportApplet.KEY_LENGTH);
+            Util.arrayCopyNonAtomic(pubData, encKeyOffset, pendingSmEncKey, (short) 0, PassportApplet.KEY_LENGTH);
+            pendingSmCipherAlgorithm = "DESede";
+            pendingSmKeyLengthBits = chipAuthKeyLengthBits;
+            pendingSmKeys = true;
             // The secure messaging keys should be replaced with the freshly
             // computed ones
             // just after the current APDU is completely processed.
             eacChangeKeys[0] = true;
             return true;
         } catch (GeneralSecurityException e) {
-            pendingAesKeys = false;
+            clearPendingSmKeys();
             eacChangeKeys[0] = false;
             return false;
         } catch (Exception e) {
-            pendingAesKeys = false;
+            clearPendingSmKeys();
             eacChangeKeys[0] = false;
             return false;
 
