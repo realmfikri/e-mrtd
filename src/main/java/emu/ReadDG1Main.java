@@ -477,8 +477,8 @@ public class ReadDG1Main {
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
     writeBinary(ch, artifacts.sodBytes, "WRITE EF.SOD");
 
-    if (artifacts.docSignerKeyPair != null && artifacts.docSignerKeyPair.getPrivate() != null) {
-      seedActiveAuthenticationKey(ch, artifacts.docSignerKeyPair.getPrivate());
+    if (artifacts.aaKeyPair != null && artifacts.aaKeyPair.getPrivate() != null) {
+      seedActiveAuthenticationKey(ch, artifacts.aaKeyPair.getPrivate());
     }
 
     Path trustDir = Paths.get("target", "trust-store");
