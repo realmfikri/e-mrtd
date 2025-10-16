@@ -261,6 +261,7 @@ public class PassportApplet extends Applet implements ISO7816 {
         fileSystem = new FileSystem();
 
         persistentState = 0;
+        setOpenComSodReads(true);
         setLifecycleState(LIFECYCLE_PREPERSONALIZED);
 
         randomData = RandomData.getInstance(RandomData.ALG_PSEUDO_RANDOM);
