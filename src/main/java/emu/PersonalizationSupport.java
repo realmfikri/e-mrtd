@@ -90,6 +90,9 @@ final class PersonalizationSupport {
     KeyPairGenerator aaGenerator = KeyPairGenerator.getInstance("RSA");
     aaGenerator.initialize(1024, random);
     KeyPair aaKeyPair = aaGenerator.generateKeyPair();
+    if (Arrays.equals(docSignerPair.getPublic().getEncoded(), aaKeyPair.getPublic().getEncoded())) {
+      throw new IllegalStateException("AA key pair must differ from document signer key pair");
+    }
     KeyPairGenerator ecGenerator = KeyPairGenerator.getInstance("EC");
     ecGenerator.initialize(new ECGenParameterSpec("secp256r1"));
     KeyPair chipAuthKeyPair = ecGenerator.generateKeyPair();

@@ -25,6 +25,7 @@ import java.security.GeneralSecurityException;
 import java.security.PublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.AlgorithmParameterSpec;
+import java.util.Arrays;
 
 import emu.PassiveAuthentication.Result;
 import emu.PassiveAuthentication.ChainValidation;
@@ -134,6 +135,24 @@ class Module8IntegrationTest {
     wrongChallenge[0] ^= 0x10;
     assertFalse(verifyActiveAuthenticationSignature(publicKey, wrongChallenge, response),
         "AA verification must fail for a mismatched challenge");
+  }
+
+  @Test
+  void dg15PublishesActiveAuthenticationKey() throws Exception {
+    PassportService service = card.passportService;
+    service.doBAC(card.bacKey);
+
+    byte[] dg15Bytes = readFile(service, PassportService.EF_DG15);
+    DG15File dg15 = new DG15File(new java.io.ByteArrayInputStream(dg15Bytes));
+    PublicKey dg15Key = dg15.getPublicKey();
+    assertNotNull(dg15Key, "DG15 must expose a public key");
+
+    byte[] expectedAA = card.artifacts.aaKeyPair.getPublic().getEncoded();
+    assertArrayEquals(expectedAA, dg15Key.getEncoded(), "DG15 should publish the AA key");
+
+    byte[] docSignerKey = card.artifacts.docSignerKeyPair.getPublic().getEncoded();
+    assertFalse(Arrays.equals(docSignerKey, dg15Key.getEncoded()),
+        "DG15 must not reuse the document signer key");
   }
 
   @Test
