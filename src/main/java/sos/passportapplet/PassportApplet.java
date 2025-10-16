@@ -110,6 +110,7 @@ public class PassportApplet extends Applet implements ISO7816 {
     static final byte HAS_MUTUALAUTHENTICATION_KEYS = 1;
 
     static final byte HAS_EXPONENT = 2;
+    private static final byte ALLOW_OPEN_COM_SOD_READS = 0x04;
 
     private static final byte LIFECYCLE_STATE_MASK = (byte) 0xC0;
 
@@ -989,7 +990,7 @@ public class PassportApplet extends Applet implements ISO7816 {
         }
 
         if (p1 == 0xde) {
-            handleLifecycleCommand(p2, lc);
+            handleLifecycleCommand(p2, lc, buffer, buffer_p);
             return;
         }
 
@@ -1455,7 +1456,9 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         short fid = Util.getShort(buffer, OFFSET_CDATA);
 
-        if (isLocked() && !hasSecureMessagingSession() && fid != FileSystem.EF_CVCA_FID) {
+        boolean openReadFile = isOpenReadFile(fid);
+        boolean openlySelectable = (fid == FileSystem.EF_COM_FID || fid == FileSystem.EF_SOD_FID);
+        if (isLocked() && !hasSecureMessagingSession() && fid != FileSystem.EF_CVCA_FID && !openReadFile && !openlySelectable) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
 
@@ -1480,7 +1483,8 @@ public class PassportApplet extends Applet implements ISO7816 {
      */
     private short processReadBinary(APDU apdu, short le, boolean protectedApdu) {
         boolean cardAccessRead = (selectedFile == FileSystem.EF_CVCA_FID);
-        if (!hasSecureMessagingSession() && !cardAccessRead) {
+        boolean openReadAllowed = isOpenReadFile(selectedFile);
+        if (!hasSecureMessagingSession() && !cardAccessRead && !openReadAllowed) {
             ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
         }
 
@@ -1494,6 +1498,11 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         short offset = Util.makeShort(p1, p2);
 
+        short effectiveLe = le;
+        if (!protectedApdu) {
+            effectiveLe = apdu.setOutgoing();
+        }
+
         byte[] file = fileSystem.getFile(selectedFile);
         if (file == null) {
             ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
@@ -1506,7 +1515,7 @@ public class PassportApplet extends Applet implements ISO7816 {
                 (short) (fileSize - offset));
         // FIXME: 37 magic
         len = PassportUtil.min(len, (short) buffer.length);
-        len = PassportUtil.min(le, len);
+        len = PassportUtil.min(effectiveLe, len);
         short bufferOffset = protectedApdu ? getSmBufferOffset(len) : 0;
         Util.arrayCopyNonAtomic(file, offset, buffer, bufferOffset, len);
 
@@ -2032,6 +2041,28 @@ public class PassportApplet extends Applet implements ISO7816 {
         return getLifecycleState() == LIFECYCLE_LOCKED;
     }
 
+    private boolean allowOpenComSodReads() {
+        return (persistentState & ALLOW_OPEN_COM_SOD_READS) != 0;
+    }
+
+    private boolean isOpenReadFile(short fid) {
+        if (!isLocked()) {
+            return false;
+        }
+        if (!allowOpenComSodReads()) {
+            return false;
+        }
+        return fid == FileSystem.EF_SOD_FID || fid == FileSystem.EF_COM_FID;
+    }
+
+    private void setOpenComSodReads(boolean allow) {
+        if (allow) {
+            persistentState = (byte) (persistentState | ALLOW_OPEN_COM_SOD_READS);
+        } else {
+            persistentState = (byte) (persistentState & ~ALLOW_OPEN_COM_SOD_READS);
+        }
+    }
+
     private void assertPrePersonalized() {
         if (isPrePersonalized()) {
             return;
@@ -2042,16 +2073,34 @@ public class PassportApplet extends Applet implements ISO7816 {
         ISOException.throwIt(ISO7816.SW_COMMAND_NOT_ALLOWED);
     }
 
-    private void handleLifecycleCommand(short p2, short lc) {
-        if (lc != 0) {
-            ISOException.throwIt(SW_WRONG_LENGTH);
-        }
+    private void handleLifecycleCommand(short p2, short lc, byte[] buffer, short dataOffset) {
         switch (p2) {
         case (short) 0xAF:
+            if (lc != 0) {
+                ISOException.throwIt(SW_WRONG_LENGTH);
+            }
             transitionLifecycle(LIFECYCLE_PERSONALIZED);
             break;
         case (short) 0xAD:
+            if (lc != 0) {
+                ISOException.throwIt(SW_WRONG_LENGTH);
+            }
             transitionLifecycle(LIFECYCLE_LOCKED);
+            break;
+        case (short) 0xFE:
+            if (lc != 1) {
+                ISOException.throwIt(SW_WRONG_LENGTH);
+            }
+            byte mode = buffer[dataOffset];
+            if (mode == 0x00) {
+                setOpenComSodReads(false);
+                System.out.println("Open COM/SOD reads disabled.");
+            } else if (mode == 0x01) {
+                setOpenComSodReads(true);
+                System.out.println("Open COM/SOD reads enabled.");
+            } else {
+                ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+            }
             break;
         default:
             ISOException.throwIt(SW_INCORRECT_P1P2);
