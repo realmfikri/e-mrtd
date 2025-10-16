@@ -154,7 +154,7 @@ final class PersonalizationSupport {
     BigInteger chipKeyId = BigInteger.ONE;
     dg14Infos.add(new ChipAuthenticationPublicKeyInfo(chipAuthKeyPair.getPublic(), chipKeyId));
     dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_128, 2, chipKeyId));
-    dg14Infos.add(new TerminalAuthenticationInfo((short) 0x010C, (byte) 0x0C));
+    dg14Infos.add(new TerminalAuthenticationInfo((short) 0x011C, (byte) 0x1C));
     DG14File dg14File = new DG14File(dg14Infos);
     byte[] dg14Bytes = dg14File.getEncoded();
 
