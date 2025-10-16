@@ -117,6 +117,7 @@ public class ReadDG1Main {
     boolean largeDG2 = false;
     boolean attemptPace = false;
     Path trustStorePath = null;
+    List<Path> trustMasterListPaths = new ArrayList<>();
     String trustStorePassword = null;
     boolean requirePA = false;
     boolean requireAA = false;
@@ -158,6 +159,11 @@ public class ReadDG1Main {
       } else if ("--trust-password".equals(arg)) {
         i = advanceWithValue(argList, i, "--trust-password");
         trustStorePassword = argList.get(i);
+      } else if (arg.startsWith("--trust-ml=")) {
+        trustMasterListPaths.add(Paths.get(arg.substring("--trust-ml=".length())));
+      } else if ("--trust-ml".equals(arg)) {
+        i = advanceWithValue(argList, i, "--trust-ml");
+        trustMasterListPaths.add(Paths.get(argList.get(i)));
       } else if ("--require-pa".equals(arg)) {
         requirePA = true;
       } else if ("--require-aa".equals(arg)) {
@@ -346,7 +352,8 @@ public class ReadDG1Main {
         chipAuthOutcome,
         taCertificates,
         taKeyPath,
-        doc);
+        doc,
+        terminalAuthDate);
     System.out.printf(
         "taCertificatesSupplied=%d, taAttempted=%s, taSucceeded=%s, dg3Readable=%s, dg4Readable=%s%n",
         terminalAuthOutcome.suppliedCertificates,
@@ -356,6 +363,12 @@ public class ReadDG1Main {
         terminalAuthOutcome.dg4Readable);
     if (terminalAuthOutcome.failure != null) {
       System.out.println("Terminal Authentication failure: " + terminalAuthOutcome.failure.getMessage());
+    }
+    if (terminalAuthOutcome.terminalRights != null) {
+      System.out.printf("taRights=%s (DG3 allowed=%s, DG4 allowed=%s)%n",
+          terminalAuthOutcome.terminalRights.name(),
+          terminalAuthOutcome.dg3AllowedByRights,
+          terminalAuthOutcome.dg4AllowedByRights);
     }
     report.dataGroups.setDg3Readable(terminalAuthOutcome.dg3Readable);
     report.dataGroups.setDg4Readable(terminalAuthOutcome.dg4Readable);
@@ -373,17 +386,24 @@ public class ReadDG1Main {
       report.dataGroups.addPresent(1);
     }
 
-    if (trustStorePath == null) {
+    List<Path> trustSources = new ArrayList<>();
+    if (trustStorePath != null) {
+      trustSources.add(trustStorePath);
+    }
+    if (trustMasterListPaths != null) {
+      trustSources.addAll(trustMasterListPaths);
+    }
+    if (trustSources.isEmpty()) {
       Path defaultTrust = Paths.get("target", "trust-store");
       if (Files.isDirectory(defaultTrust)) {
-        trustStorePath = defaultTrust;
+        trustSources.add(defaultTrust);
       }
     }
 
-    boolean runPA = trustStorePath != null || requirePA;
+    boolean runPA = !trustSources.isEmpty() || requirePA;
     if (runPA) {
       char[] passwordChars = trustStorePassword != null ? trustStorePassword.toCharArray() : null;
-      PassiveAuthentication.Result paResult = PassiveAuthentication.verify(svc, trustStorePath, passwordChars);
+      PassiveAuthentication.Result paResult = PassiveAuthentication.verify(svc, trustSources, passwordChars);
       paResult.printReport();
       report.setPassiveAuthentication(paResult);
       if (requirePA && !paResult.isPass()) {
@@ -1233,7 +1253,8 @@ public class ReadDG1Main {
       ChipAuthOutcome chipOutcome,
       List<CvcBundle> cvcBundles,
       Path taKeyPath,
-      String documentNumber) {
+      String documentNumber,
+      LocalDate validationDate) {
     TerminalAuthOutcome outcome = new TerminalAuthOutcome();
     outcome.suppliedCertificates = cvcBundles != null ? cvcBundles.size() : 0;
 
@@ -1267,6 +1288,16 @@ public class ReadDG1Main {
       certificateChain.add(bundle.cardCertificate);
     }
 
+    CvcChainValidationResult chainValidation = validateCvcChain(cvcBundles, validationDate);
+    outcome.cvcValidation = chainValidation;
+    if (chainValidation != null) {
+      logCvcChainValidation(chainValidation);
+      outcome.terminalRole = chainValidation.terminalRole;
+      outcome.terminalRights = chainValidation.terminalRights;
+      outcome.dg3AllowedByRights = allowsDataGroup(chainValidation.terminalRights, 3);
+      outcome.dg4AllowedByRights = allowsDataGroup(chainValidation.terminalRights, 4);
+    }
+
     PrivateKey terminalKey;
     try {
       terminalKey = loadPrivateKey(taKeyPath);
@@ -1298,6 +1329,20 @@ public class ReadDG1Main {
 
     outcome.dg3Readable = attemptDataGroupRead(svc, PassportService.EF_DG3, "DG3");
     outcome.dg4Readable = attemptDataGroupRead(svc, PassportService.EF_DG4, "DG4");
+    if (outcome.terminalRights != null) {
+      if (outcome.dg3AllowedByRights && !outcome.dg3Readable) {
+        System.out.println("DG3 read denied despite terminal rights including DG3 access.");
+      }
+      if (!outcome.dg3AllowedByRights && outcome.dg3Readable) {
+        System.out.println("DG3 read succeeded even though terminal rights do not include DG3.");
+      }
+      if (outcome.dg4AllowedByRights && !outcome.dg4Readable) {
+        System.out.println("DG4 read denied despite terminal rights including DG4 access.");
+      }
+      if (!outcome.dg4AllowedByRights && outcome.dg4Readable) {
+        System.out.println("DG4 read succeeded even though terminal rights do not include DG4.");
+      }
+    }
     return outcome;
   }
 
@@ -1396,11 +1441,11 @@ public class ReadDG1Main {
   }
 
   private static void describeCvc(CvcBundle bundle) {
-    try {
-      CVCertificateBody body = bundle.certificate.getCertificateBody();
-      HolderReferenceField holder = null;
-      CAReferenceField authority = null;
-      CVCAuthorizationTemplate authorizationTemplate = null;
+      try {
+        CVCertificateBody body = bundle.certificate.getCertificateBody();
+        HolderReferenceField holder = null;
+        CAReferenceField authority = null;
+        CVCAuthorizationTemplate authorizationTemplate = null;
       AuthorizationField authorizationField = null;
       Date validFrom = null;
       Date validTo = null;
@@ -1444,6 +1489,160 @@ public class ReadDG1Main {
     } catch (Exception e) {
       System.out.printf("  %s → unable to summarise: %s%n", bundle.path, e.getMessage());
     }
+  }
+
+  private static CvcChainValidationResult validateCvcChain(List<CvcBundle> bundles, LocalDate validationDate) {
+    CvcChainValidationResult result = new CvcChainValidationResult();
+    if (bundles == null || bundles.isEmpty()) {
+      result.warnings.add("No CVC certificates provided for validation.");
+      return result;
+    }
+    Date referenceDate = validationDate != null ? Date.from(validationDate.atStartOfDay(ZoneOffset.UTC).toInstant()) : null;
+    CvcBundle previous = null;
+    for (CvcBundle bundle : bundles) {
+      if (bundle == null || bundle.certificate == null || bundle.cardCertificate == null) {
+        result.errors.add(String.format("Unable to validate certificate %s: not parsed.", describePath(bundle)));
+        continue;
+      }
+      CVCertificateBody body;
+      try {
+        body = bundle.certificate.getCertificateBody();
+      } catch (Exception e) {
+        result.errors.add(String.format("Unable to obtain certificate body for %s: %s",
+            describePath(bundle),
+            e.getMessage() != null ? e.getMessage() : "unknown error"));
+        continue;
+      }
+      Date notBefore = null;
+      try {
+        notBefore = body.getValidFrom();
+      } catch (Exception ignore) {
+      }
+      Date notAfter = null;
+      try {
+        notAfter = body.getValidTo();
+      } catch (Exception ignore) {
+      }
+      if (referenceDate != null) {
+        if (notBefore != null && referenceDate.before(notBefore)) {
+          result.errors.add(String.format("Certificate %s not yet valid on %s.", describePath(bundle), formatDate(referenceDate)));
+        }
+        if (notAfter != null && referenceDate.after(notAfter)) {
+          result.errors.add(String.format("Certificate %s expired on %s.", describePath(bundle), formatDate(notAfter)));
+        }
+      }
+
+      if (previous != null && previous.certificate != null && previous.cardCertificate != null) {
+        CVCertificateBody previousBody;
+        try {
+          previousBody = previous.certificate.getCertificateBody();
+        } catch (Exception e) {
+          previousBody = null;
+        }
+        HolderReferenceField previousHolder = null;
+        if (previousBody != null) {
+          try {
+            previousHolder = previousBody.getHolderReference();
+          } catch (Exception ignore) {
+            previousHolder = null;
+          }
+        }
+        CAReferenceField authority;
+        try {
+          authority = body.getAuthorityReference();
+        } catch (Exception e) {
+          authority = null;
+        }
+        if (previousHolder != null && authority != null) {
+          if (!previousHolder.getConcatenated().equalsIgnoreCase(authority.getConcatenated())) {
+            result.errors.add(String.format("Issuer reference mismatch: %s signed by %s but authority expects %s.",
+                describePath(bundle),
+                previousHolder.getConcatenated(),
+                authority.getConcatenated()));
+          }
+        } else {
+          result.warnings.add(String.format("Unable to compare issuer/holder references for %s.", describePath(bundle)));
+        }
+        try {
+          bundle.cardCertificate.verify(previous.cardCertificate.getPublicKey());
+        } catch (GeneralSecurityException e) {
+          result.errors.add(String.format("Certificate %s signature failed verification with issuer public key: %s",
+              describePath(bundle), e.getMessage()));
+        }
+      }
+
+      CVCAuthorizationTemplate authorizationTemplate;
+      try {
+        authorizationTemplate = body.getAuthorizationTemplate();
+      } catch (Exception e) {
+        authorizationTemplate = null;
+      }
+      AuthorizationField authorizationField = null;
+      if (authorizationTemplate != null) {
+        try {
+          authorizationField = authorizationTemplate.getAuthorizationField();
+        } catch (Exception ignore) {
+          authorizationField = null;
+        }
+      }
+      if (authorizationField != null) {
+        result.terminalRole = authorizationField.getRole();
+        result.terminalRights = authorizationField.getAccessRight();
+      }
+
+      previous = bundle;
+    }
+    result.valid = result.errors.isEmpty();
+    return result;
+  }
+
+  private static void logCvcChainValidation(CvcChainValidationResult validation) {
+    if (validation == null) {
+      return;
+    }
+    if (validation.valid) {
+      System.out.println("CVC chain validation: OK");
+    } else {
+      System.out.println("CVC chain validation: issues detected");
+    }
+    for (String error : validation.errors) {
+      System.out.println("  Chain error: " + error);
+    }
+    for (String warning : validation.warnings) {
+      System.out.println("  Chain warning: " + warning);
+    }
+    if (validation.terminalRole != null) {
+      System.out.println("  Terminal role: " + validation.terminalRole.name());
+    }
+    if (validation.terminalRights != null) {
+      boolean dg3 = allowsDataGroup(validation.terminalRights, 3);
+      boolean dg4 = allowsDataGroup(validation.terminalRights, 4);
+      System.out.printf("  Terminal rights: %s (DG3=%s, DG4=%s)%n",
+          validation.terminalRights.name(),
+          dg3,
+          dg4);
+    }
+  }
+
+  private static boolean allowsDataGroup(AccessRightEnum rights, int dataGroup) {
+    if (rights == null) {
+      return false;
+    }
+    String name = rights.name();
+    if (dataGroup == 3) {
+      return name.contains("DG3");
+    }
+    if (dataGroup == 4) {
+      return name.contains("DG4");
+    }
+    return false;
+  }
+
+  private static String describePath(CvcBundle bundle) {
+    if (bundle == null || bundle.path == null) {
+      return "(in-memory)";
+    }
+    return bundle.path.toString();
   }
 
   private static String formatDate(Date date) {
@@ -1523,6 +1722,14 @@ public class ReadDG1Main {
     }
   }
 
+  private static final class CvcChainValidationResult {
+    boolean valid;
+    final List<String> warnings = new ArrayList<>();
+    final List<String> errors = new ArrayList<>();
+    AuthorizationRoleEnum terminalRole;
+    AccessRightEnum terminalRights;
+  }
+
   private static final class TerminalAuthOutcome {
     int suppliedCertificates;
     boolean attempted;
@@ -1530,6 +1737,11 @@ public class ReadDG1Main {
     boolean dg3Readable;
     boolean dg4Readable;
     Exception failure;
+    CvcChainValidationResult cvcValidation;
+    AuthorizationRoleEnum terminalRole;
+    AccessRightEnum terminalRights;
+    boolean dg3AllowedByRights;
+    boolean dg4AllowedByRights;
   }
 
   private static final class Dg2FaceSummary {

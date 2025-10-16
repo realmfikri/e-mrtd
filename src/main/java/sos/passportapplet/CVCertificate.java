@@ -8,6 +8,9 @@ import javacard.security.KeyBuilder;
 import javacard.security.RSAPublicKey;
 import javacard.security.Signature;
 
+import java.util.Calendar;
+import java.util.TimeZone;
+
 /**
  * Encapsulation class for a card verifiable certificates according to EAC 1.11.
  * 
@@ -115,6 +118,7 @@ public class CVCertificate {
         currentCertPublicKey = (RSAPublicKey) KeyBuilder.buildKey(
                 KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
         signature = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
+        initializeCurrentDateFromSystemClock();
     }
 
     /**
@@ -302,6 +306,31 @@ public class CVCertificate {
 
     boolean hasManualCurrentDate() {
         return (currentDateFlags & FLAG_CURRENT_DATE_MANUAL) == FLAG_CURRENT_DATE_MANUAL;
+    }
+
+    private void initializeCurrentDateFromSystemClock() {
+        try {
+            Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            int year = calendar.get(Calendar.YEAR);
+            int month = calendar.get(Calendar.MONTH) + 1;
+            int day = calendar.get(Calendar.DAY_OF_MONTH);
+            applyCurrentDateDigits(year, month, day);
+        } catch (Throwable ignored) {
+            // Keep default date when running on real card or when system time unavailable.
+        }
+    }
+
+    private void applyCurrentDateDigits(int year, int month, int day) {
+        if (year <= 0 || month <= 0 || day <= 0) {
+            return;
+        }
+        int shortYear = year % 100;
+        currentDate[0] = (byte) ((shortYear / 10) % 10);
+        currentDate[1] = (byte) (shortYear % 10);
+        currentDate[2] = (byte) ((month / 10) % 10);
+        currentDate[3] = (byte) (month % 10);
+        currentDate[4] = (byte) ((day / 10) % 10);
+        currentDate[5] = (byte) (day % 10);
     }
 
     void setCurrentDate(byte[] data, short offset, short length) {

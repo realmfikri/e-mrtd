@@ -26,6 +26,7 @@ import java.security.PublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.AlgorithmParameterSpec;
 import java.util.Arrays;
+import java.util.List;
 
 import emu.PassiveAuthentication.Result;
 import emu.PassiveAuthentication.ChainValidation;
@@ -104,11 +105,29 @@ class Module8IntegrationTest {
     PassportService service = card.passportService;
     service.doBAC(card.bacKey);
 
-    Result result = PassiveAuthentication.verify(service, null, null);
+    Result result = PassiveAuthentication.verify(service, (Path) null, null);
     ChainValidation chain = result.getChainValidation();
     assertNotNull(chain);
     assertFalse(chain.chainOk, "Chain validation must fail without trust anchors");
     assertFalse(result.isPass(), "Overall verdict must be failure");
+  }
+
+  @Test
+  void passiveAuthenticationAcceptsMasterListDirectory() throws Exception {
+    PassportService service = card.passportService;
+    service.doBAC(card.bacKey);
+
+    Path masterListDir = Files.createTempDirectory("master-list");
+    Files.write(masterListDir.resolve("csca.cer"), card.artifacts.cscaCert.getEncoded());
+    Files.write(masterListDir.resolve("docsigner.cer"), card.artifacts.docSignerCert.getEncoded());
+
+    List<Path> masterList = List.of(masterListDir);
+    Result result = PassiveAuthentication.verify(service, masterList, null);
+    assertTrue(result.getChainValidation().chainOk, "Chain validation should succeed with master list directory");
+    assertTrue(result.getSignatureCheck().valid, "SOD signature should validate with trust anchor");
+    assertTrue(result.getMissingDataGroups().containsAll(List.of(3, 4, 14, 15)),
+        "DG3/DG4/DG14/DG15 should be reported missing without TA");
+    assertFalse(result.isPass(), "Overall PA verdict remains false until restricted DGs are accessible");
   }
 
   @Test
