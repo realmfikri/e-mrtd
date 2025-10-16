@@ -41,10 +41,14 @@ final class TestCardManager {
   }
 
   static TestCard provisionCard() throws Exception {
-    return provisionCard(false);
+    return provisionCard(false, false);
   }
 
   static TestCard provisionCard(boolean tamperDg1) throws Exception {
+    return provisionCard(tamperDg1, false);
+  }
+
+  static TestCard provisionCard(boolean tamperDg1, boolean enableOpenReads) throws Exception {
     CardSimulator simulator = new CardSimulator();
     AID aid = new AID(MRTD_AID, (short) 0, (byte) MRTD_AID.length);
     simulator.installApplet(aid, sos.passportapplet.PassportApplet.class);
@@ -136,6 +140,10 @@ final class TestCardManager {
     byte[] mrzSeed = buildMrzSeed(DEFAULT_DOC, DEFAULT_DOB, DEFAULT_DOE);
     putData(channel, 0x00, 0x62, mrzSeed);
     seedActiveAuthenticationKey(channel, artifacts.aaKeyPair.getPrivate());
+
+    if (enableOpenReads) {
+      putData(channel, 0xDE, 0xFE, new byte[]{0x01});
+    }
 
     putData(channel, 0xDE, 0xAF, new byte[0]);
     putData(channel, 0xDE, 0xAD, new byte[0]);
