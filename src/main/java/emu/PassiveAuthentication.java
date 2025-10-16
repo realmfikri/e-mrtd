@@ -64,6 +64,11 @@ public final class PassiveAuthentication {
   }
 
   public static Result verify(PassportService service, Path trustStorePath, char[] trustStorePassword) throws Exception {
+    List<Path> paths = trustStorePath != null ? List.of(trustStorePath) : Collections.emptyList();
+    return verify(service, paths, trustStorePassword);
+  }
+
+  public static Result verify(PassportService service, List<Path> trustStorePaths, char[] trustStorePassword) throws Exception {
     byte[] sodBytes = readFile(service, PassportService.EF_SOD);
     if (sodBytes == null) {
       return Result.failed("EF.SOD missing", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
@@ -101,7 +106,7 @@ public final class PassiveAuthentication {
 
     SignatureCheck signatureCheck = verifySodSignature(sodBytes, sod);
 
-    TrustStore trustStore = loadTrustStore(trustStorePath, trustStorePassword);
+    TrustStore trustStore = loadTrustStores(trustStorePaths, trustStorePassword);
 
     ChainValidation chainValidation = validateChain(signatureCheck.signerCertificate, sod.getDocSigningCertificates(), trustStore);
 
@@ -283,23 +288,39 @@ public final class PassiveAuthentication {
     if (path == null) {
       return new TrustStore(Collections.emptyList(), Collections.singletonList("Trust store not provided"));
     }
+    return loadTrustStores(List.of(path), password);
+  }
+
+  private static TrustStore loadTrustStores(List<Path> paths, char[] password) {
+    if (paths == null || paths.isEmpty()) {
+      return new TrustStore(Collections.emptyList(), Collections.singletonList("Trust store not provided"));
+    }
     List<X509Certificate> certificates = new ArrayList<>();
     List<String> issues = new ArrayList<>();
-    try {
-      if (Files.isDirectory(path)) {
-        loadDirectoryTrustStore(path, certificates, issues);
-      } else {
-        String fileName = path.getFileName().toString().toLowerCase(Locale.ROOT);
-        if (fileName.endsWith(".jks") || fileName.endsWith(".keystore")) {
-          loadKeyStore(path, "JKS", password, certificates, issues);
-        } else if (fileName.endsWith(".p12") || fileName.endsWith(".pfx")) {
-          loadKeyStore(path, "PKCS12", password, certificates, issues);
-        } else {
-          loadCertificateFile(path, certificates, issues);
-        }
+    for (Path path : paths) {
+      if (path == null) {
+        continue;
       }
-    } catch (Exception e) {
-      issues.add("Failed to load trust store: " + e.getMessage());
+      try {
+        if (!Files.exists(path)) {
+          issues.add("Trust store path not found: " + path);
+          continue;
+        }
+        if (Files.isDirectory(path)) {
+          loadDirectoryTrustStore(path, certificates, issues);
+        } else {
+          String fileName = path.getFileName().toString().toLowerCase(Locale.ROOT);
+          if (fileName.endsWith(".jks") || fileName.endsWith(".keystore")) {
+            loadKeyStore(path, "JKS", password, certificates, issues);
+          } else if (fileName.endsWith(".p12") || fileName.endsWith(".pfx")) {
+            loadKeyStore(path, "PKCS12", password, certificates, issues);
+          } else {
+            loadCertificateFile(path, certificates, issues);
+          }
+        }
+      } catch (Exception e) {
+        issues.add("Failed to load trust store " + path.getFileName() + ": " + e.getMessage());
+      }
     }
 
     validateTrustAnchors(certificates, issues);
@@ -378,6 +399,7 @@ public final class PassiveAuthentication {
       issues.add("No trust anchors available");
       return new ChainValidation(false, "Missing trust anchors", issues);
     }
+    boolean anchorVerified = verifySignerAgainstAnchors(signerCert, trustStore.certificates, issues);
     try {
       Set<TrustAnchor> anchors = new HashSet<>();
       for (X509Certificate cert : trustStore.certificates) {
@@ -400,6 +422,10 @@ public final class PassiveAuthentication {
 
       CertPathBuilder builder = CertPathBuilder.getInstance("PKIX");
       builder.build(params);
+      if (!anchorVerified) {
+        issues.add("Signer certificate not verified by provided trust anchors");
+        return new ChainValidation(false, "Signer not linked to trust anchor", issues);
+      }
       return new ChainValidation(true, "Validated", issues);
     } catch (CertPathBuilderException e) {
       issues.add("Cert path builder error: " + e.getMessage());
@@ -408,6 +434,24 @@ public final class PassiveAuthentication {
       issues.add("Cert path validation failure: " + e.getMessage());
       return new ChainValidation(false, e.getMessage(), issues);
     }
+  }
+
+  private static boolean verifySignerAgainstAnchors(X509Certificate signerCert,
+                                                    List<X509Certificate> anchors,
+                                                    List<String> issues) {
+    if (anchors == null || anchors.isEmpty()) {
+      return false;
+    }
+    for (X509Certificate anchor : anchors) {
+      try {
+        signerCert.verify(anchor.getPublicKey());
+        issues.add("Signer verified by trust anchor: " + anchor.getSubjectX500Principal().getName());
+        return true;
+      } catch (GeneralSecurityException e) {
+        // continue
+      }
+    }
+    return false;
   }
 
   public static final class Result {
