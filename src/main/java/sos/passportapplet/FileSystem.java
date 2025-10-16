@@ -184,7 +184,11 @@ public class FileSystem {
     }
 
     public short getFileSize(short fid) {
-        short idx = getFileIndex(fid, true);
+        return getFileSize(fid, true);
+    }
+
+    public short getFileSize(short fid, boolean enforceAccessControl) {
+        short idx = getFileIndex(fid, enforceAccessControl);
         if (idx == -1) {
             return -1;
         }

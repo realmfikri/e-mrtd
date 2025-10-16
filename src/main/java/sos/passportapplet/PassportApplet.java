@@ -260,7 +260,7 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         fileSystem = new FileSystem();
 
-        persistentState = ALLOW_OPEN_COM_SOD_READS;
+        persistentState = 0;
         setLifecycleState(LIFECYCLE_PREPERSONALIZED);
 
         randomData = RandomData.getInstance(RandomData.ALG_PSEUDO_RANDOM);
@@ -571,10 +571,16 @@ public class PassportApplet extends Applet implements ISO7816 {
     }
 
     private short normalizeSmError(short reason) {
-        if (reason == ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED) {
+        if (reason == ISO7816.SW_CONDITIONS_NOT_SATISFIED
+                || reason == ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED) {
             return (short) 0x6988;
         }
-        if (reason == ISO7816.SW_DATA_INVALID) {
+        if (reason == ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED
+                || reason == ISO7816.SW_FUNC_NOT_SUPPORTED) {
+            return ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED;
+        }
+        if (reason == ISO7816.SW_DATA_INVALID
+                || reason == ISO7816.SW_WRONG_DATA) {
             return ISO7816.SW_DATA_INVALID;
         }
         if (reason == ISO7816.SW_WRONG_LENGTH) {
@@ -1482,7 +1488,7 @@ public class PassportApplet extends Applet implements ISO7816 {
         selectedFile = fid;
         volatileState[0] |= FILE_SELECTED;
 
-        short fileSize = fileSystem.getFileSize(fid);
+        short fileSize = fileSystem.getFileSize(fid, false);
         if (fileSize < 0) {
             ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
         }
@@ -1597,11 +1603,24 @@ public class PassportApplet extends Applet implements ISO7816 {
             ISOException.throwIt(ISO7816.SW_WRONG_P1P2);
         }
 
-        if (protectedApdu && le > 0 && le > available && available <= (short) 0xFF) {
-            ISOException.throwIt((short) (ISO7816.SW_CORRECT_LENGTH_00 | (available & 0xFF)));
+        short requestedLe = le;
+        if (!protectedApdu) {
+            requestedLe = (short) (buffer[OFFSET_LC] & 0xFF);
+            if (requestedLe == 0) {
+                requestedLe = (short) 0x0100;
+            }
+        } else if (requestedLe == 0) {
+            requestedLe = (short) 0x0100;
         }
 
-        short effectiveLe = le;
+        if (requestedLe > 0 && requestedLe > available) {
+            if (available <= (short) 0x00FF) {
+                ISOException.throwIt((short) (ISO7816.SW_CORRECT_LENGTH_00 | (available & 0x00FF)));
+            }
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+
+        short effectiveLe = requestedLe;
         if (!protectedApdu) {
             effectiveLe = apdu.setOutgoing();
         }
