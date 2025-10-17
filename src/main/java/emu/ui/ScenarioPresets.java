@@ -26,9 +26,17 @@ final class ScenarioPresets {
             "Attempts PACE using MRZ derived keys.",
             readStep("Run ReadDG1Main", "--seed", "--attempt-pace")),
         scenario(
-            "PACE (CAN/PIN/PUK)",
-            "Attempts PACE with CAN-based credentials (customise via advanced toggles).",
+            "PACE (CAN)",
+            "Attempts PACE with a CAN secret (customise via advanced toggles).",
             readStep("Run ReadDG1Main", "--seed", "--attempt-pace", "--can=123456")),
+        scenario(
+            "PACE (PIN)",
+            "Attempts PACE with a PIN secret (customise via advanced toggles).",
+            readStep("Run ReadDG1Main", "--seed", "--attempt-pace", "--pin=123456")),
+        scenario(
+            "PACE (PUK)",
+            "Attempts PACE with a PUK secret (customise via advanced toggles).",
+            readStep("Run ReadDG1Main", "--seed", "--attempt-pace", "--puk=123456789")),
         scenario(
             "PACE Profile Preference (AES128)",
             "Hints the PACE profile preference to AES128.",
@@ -56,19 +64,19 @@ final class ScenarioPresets {
         scenario(
             "Terminal Auth: DG3 Rights",
             "Generates a TA chain granting DG3 only, then performs a read.",
-            generateAndRead("target/ta-demo/dg3", "--rights=DG3", List.of("--seed", "--attempt-pace", "--ta-cvc=target/ta-demo/dg3/terminal.cvc", "--ta-key=target/ta-demo/dg3/terminal.key"))),
+            generateAndRead("target/ta-demo/dg3", List.of("--rights=DG3"), List.of("--seed", "--attempt-pace", "--ta-cvc=target/ta-demo/dg3/terminal.cvc", "--ta-key=target/ta-demo/dg3/terminal.key"))),
         scenario(
             "Terminal Auth: DG4 Rights",
             "Generates a TA chain granting DG4 only, then performs a read.",
-            generateAndRead("target/ta-demo/dg4", "--rights=DG4", List.of("--seed", "--attempt-pace", "--ta-cvc=target/ta-demo/dg4/terminal.cvc", "--ta-key=target/ta-demo/dg4/terminal.key"))),
+            generateAndRead("target/ta-demo/dg4", List.of("--rights=DG4"), List.of("--seed", "--attempt-pace", "--ta-cvc=target/ta-demo/dg4/terminal.cvc", "--ta-key=target/ta-demo/dg4/terminal.key"))),
         scenario(
             "Terminal Auth: DG3+DG4 Rights",
             "Generates a TA chain granting DG3 and DG4 access.",
-            generateAndRead("target/ta-demo/dg34", "--rights=DG3_DG4", List.of("--seed", "--attempt-pace", "--ta-cvc=target/ta-demo/dg34/terminal.cvc", "--ta-key=target/ta-demo/dg34/terminal.key"))),
+            generateAndRead("target/ta-demo/dg34", List.of("--rights=DG3_DG4"), List.of("--seed", "--attempt-pace", "--ta-cvc=target/ta-demo/dg34/terminal.cvc", "--ta-key=target/ta-demo/dg34/terminal.key"))),
         scenario(
             "Terminal Auth: Date Validity",
             "Runs TA with a future date override to show not-yet-valid behaviour.",
-            generateAndRead("target/ta-demo/date", "--rights=DG3_DG4", List.of("--seed", "--attempt-pace", "--ta-cvc=target/ta-demo/date/terminal.cvc", "--ta-key=target/ta-demo/date/terminal.key", "--ta-date=2035-01-01"))),
+            generateAndRead("target/ta-demo/date", List.of("--rights=DG3_DG4", "--validity-days=30"), List.of("--seed", "--attempt-pace", "--ta-cvc=target/ta-demo/date/terminal.cvc", "--ta-key=target/ta-demo/date/terminal.key", "--ta-date=2035-01-01"))),
         scenario(
             "Open Reads Policy (COM/SOD)",
             "Toggles open and secure COM/SOD read policies.",
@@ -92,12 +100,12 @@ final class ScenarioPresets {
     return List.of(new ScenarioStep(stepName, READ_MAIN, List.of(args), true));
   }
 
-  private static List<ScenarioStep> generateAndRead(String outDir, String rightsArg, List<String> readArgs) {
+  private static List<ScenarioStep> generateAndRead(String outDir, List<String> generatorExtraArgs, List<String> readArgs) {
     List<ScenarioStep> steps = new ArrayList<>();
-    List<String> generatorArgs = new ArrayList<>();
-    generatorArgs.add("--out-dir=" + outDir);
-    generatorArgs.add(rightsArg);
-    steps.add(new ScenarioStep("Generate TA chain", GENERATE_TA, generatorArgs, false));
+    List<String> generatorStepArgs = new ArrayList<>();
+    generatorStepArgs.add("--out-dir=" + outDir);
+    generatorStepArgs.addAll(generatorExtraArgs);
+    steps.add(new ScenarioStep("Generate TA chain", GENERATE_TA, generatorStepArgs, false));
     steps.add(new ScenarioStep("Run ReadDG1Main", READ_MAIN, readArgs, true));
     return List.copyOf(steps);
   }

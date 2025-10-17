@@ -5,17 +5,22 @@ import javafx.concurrent.Task;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 final class ScenarioRunner {
 
   private static final String READ_MAIN_CLASS = "emu.ReadDG1Main";
+  private static final String MISSING_TRUST_STORE_DIR = "target/ui-missing-trust";
 
   private final Path projectDirectory = Paths.get("").toAbsolutePath();
   private final String javaExecutable;
@@ -36,10 +41,15 @@ final class ScenarioRunner {
     Objects.requireNonNull(logConsumer, "logConsumer");
 
     List<String> advancedArgs = advancedOptions.toArgs();
+    boolean prepareMissingTrustStore = shouldPrepareMissingTrustStore(preset, advancedOptions);
 
     return new Task<>() {
       @Override
       protected ScenarioResult call() throws Exception {
+        if (prepareMissingTrustStore) {
+          prepareMissingTrustStoreDirectory();
+        }
+
         Path parent = reportPath.getParent();
         if (parent != null) {
           Files.createDirectories(parent);
@@ -50,7 +60,7 @@ final class ScenarioRunner {
         int exitCode = 0;
         String failedStep = null;
 
-    for (ScenarioStep step : preset.getSteps()) {
+        for (ScenarioStep step : preset.getSteps()) {
           if (isCancelled()) {
             break;
           }
@@ -105,6 +115,36 @@ final class ScenarioRunner {
     }
     command.addAll(args);
     return command;
+  }
+
+  private boolean shouldPrepareMissingTrustStore(ScenarioPreset preset, AdvancedOptionsSnapshot options) {
+    if (options.getTrustStorePath() != null && !options.getTrustStorePath().isBlank()) {
+      return false;
+    }
+    for (ScenarioStep step : preset.getSteps()) {
+      for (String arg : step.getArgs()) {
+        if (arg.startsWith("--trust-store=") && arg.endsWith(MISSING_TRUST_STORE_DIR)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private void prepareMissingTrustStoreDirectory() throws IOException {
+    Path dir = projectDirectory.resolve(MISSING_TRUST_STORE_DIR);
+    if (Files.exists(dir)) {
+      try (Stream<Path> stream = Files.walk(dir)) {
+        List<Path> toDelete = stream
+            .filter(path -> !path.equals(dir))
+            .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
+            .collect(Collectors.toList());
+        for (Path path : toDelete) {
+          Files.deleteIfExists(path);
+        }
+      }
+    }
+    Files.createDirectories(dir);
   }
 }
 
