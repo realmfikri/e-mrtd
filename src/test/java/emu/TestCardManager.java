@@ -153,7 +153,7 @@ final class TestCardManager {
     TerminalCardService terminalService = new TerminalCardService(terminal);
     terminalService.open();
 
-    LoggingCardService loggingService = new LoggingCardService(terminalService);
+    LoggingCardService loggingService = new LoggingCardService(terminalService, null);
     loggingService.open();
 
     PassportService passportService = new PassportService(

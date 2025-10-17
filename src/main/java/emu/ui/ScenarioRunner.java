@@ -1,5 +1,11 @@
 package emu.ui;
 
+import emu.SessionReport;
+import emu.SimConfig;
+import emu.SimEvents;
+import emu.SimLogCategory;
+import emu.SimPhase;
+import emu.SimRunner;
 import javafx.concurrent.Task;
 
 import java.io.BufferedReader;
@@ -9,11 +15,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -21,9 +30,13 @@ final class ScenarioRunner {
 
   private static final String READ_MAIN_CLASS = "emu.ReadDG1Main";
   private static final String MISSING_TRUST_STORE_DIR = "target/ui-missing-trust";
+  private static final String DEFAULT_DOC = "123456789";
+  private static final String DEFAULT_DOB = "750101";
+  private static final String DEFAULT_DOE = "250101";
 
   private final Path projectDirectory = Paths.get("").toAbsolutePath();
   private final String javaExecutable;
+  private final SimRunner simRunner = new SimRunner();
 
   ScenarioRunner() {
     String javaHome = System.getProperty("java.home");
@@ -34,14 +47,15 @@ final class ScenarioRunner {
       ScenarioPreset preset,
       AdvancedOptionsSnapshot advancedOptions,
       Path reportPath,
-      Consumer<String> logConsumer) {
+      ScenarioExecutionListener listener) {
     Objects.requireNonNull(preset, "preset");
     Objects.requireNonNull(advancedOptions, "advancedOptions");
     Objects.requireNonNull(reportPath, "reportPath");
-    Objects.requireNonNull(logConsumer, "logConsumer");
+    Objects.requireNonNull(listener, "listener");
+
+    boolean prepareMissingTrustStore = shouldPrepareMissingTrustStore(preset, advancedOptions);
 
     List<String> advancedArgs = advancedOptions.toArgs();
-    boolean prepareMissingTrustStore = shouldPrepareMissingTrustStore(preset, advancedOptions);
 
     return new Task<>() {
       @Override
@@ -59,42 +73,37 @@ final class ScenarioRunner {
         List<String> executedCommands = new ArrayList<>();
         int exitCode = 0;
         String failedStep = null;
+        SessionReport finalReport = null;
 
         for (ScenarioStep step : preset.getSteps()) {
           if (isCancelled()) {
             break;
           }
+
           List<String> command = buildCommand(step, advancedArgs, reportPath);
-          String cli = String.join(" ", command);
-          executedCommands.add(cli);
-          logConsumer.accept("$ " + cli);
+          executedCommands.add(String.join(" ", command));
 
-          ProcessBuilder pb = new ProcessBuilder(command);
-          pb.directory(projectDirectory.toFile());
-          pb.redirectErrorStream(true);
-          Process process = pb.start();
-
-          try (BufferedReader reader = new BufferedReader(
-              new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-              if (isCancelled()) {
-                process.destroyForcibly();
-                break;
-              }
-              logConsumer.accept("[" + step.getName() + "] " + line);
+          if (READ_MAIN_CLASS.equals(step.getMainClass())) {
+            try {
+              SimConfig config = buildSimConfig(step, advancedOptions, reportPath);
+              finalReport = runSimStep(step, config, listener);
+            } catch (Exception e) {
+              listener.onLog(SimLogCategory.GENERAL, step.getName(), "Error: " + e.getMessage());
+              exitCode = 1;
+              failedStep = step.getName();
+              break;
             }
-          }
-
-          exitCode = process.waitFor();
-          if (exitCode != 0) {
-            failedStep = step.getName();
-            break;
+          } else {
+            exitCode = runProcessStep(step, command, listener);
+            if (exitCode != 0) {
+              failedStep = step.getName();
+              break;
+            }
           }
         }
 
         boolean success = exitCode == 0 && !isCancelled();
-        return new ScenarioResult(success, exitCode, failedStep, executedCommands, reportPath);
+        return new ScenarioResult(success, exitCode, failedStep, executedCommands, reportPath, finalReport);
       }
     };
   }
@@ -145,6 +154,148 @@ final class ScenarioRunner {
       }
     }
     Files.createDirectories(dir);
+  }
+
+  private SessionReport runSimStep(ScenarioStep step, SimConfig config, ScenarioExecutionListener listener) throws Exception {
+    UiSimEvents events = new UiSimEvents(listener, step.getName());
+    SessionReport report = simRunner.run(config, events);
+    listener.onReport(report);
+    return report;
+  }
+
+  private int runProcessStep(ScenarioStep step, List<String> command, ScenarioExecutionListener listener)
+      throws IOException, InterruptedException {
+    listener.onLog(SimLogCategory.GENERAL, step.getName(), "$ " + String.join(" ", command));
+    ProcessBuilder pb = new ProcessBuilder(command);
+    pb.directory(projectDirectory.toFile());
+    pb.redirectErrorStream(true);
+    Process process = pb.start();
+    try (BufferedReader reader = new BufferedReader(
+        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        listener.onLog(SimLogCategory.GENERAL, step.getName(), line);
+      }
+    }
+    return process.waitFor();
+  }
+
+  private SimConfig buildSimConfig(
+      ScenarioStep step,
+      AdvancedOptionsSnapshot options,
+      Path reportPath) {
+    SimConfig.Builder builder = new SimConfig.Builder()
+        .docNumber(DEFAULT_DOC)
+        .dateOfBirth(DEFAULT_DOB)
+        .dateOfExpiry(DEFAULT_DOE)
+        .terminalAuthDate(LocalDate.now(ZoneOffset.UTC))
+        .reportOutput(reportPath);
+
+    Path previewDir = reportPath.getParent() != null
+        ? reportPath.getParent().resolve("faces")
+        : Paths.get("target", "ui-faces");
+    builder.facePreviewDirectory(previewDir);
+
+    applyStepArgs(builder, step.getArgs());
+    options.applyToBuilder(builder);
+    return builder.build();
+  }
+
+  private void applyStepArgs(SimConfig.Builder builder, List<String> args) {
+    for (String arg : args) {
+      if ("--seed".equals(arg)) {
+        builder.seed(true);
+      } else if ("--attempt-pace".equals(arg)) {
+        builder.attemptPace(true);
+      } else if (arg.startsWith("--pace-prefer=")) {
+        builder.pacePreference(arg.substring("--pace-prefer=".length()));
+      } else if ("--require-pa".equals(arg)) {
+        builder.requirePa(true);
+      } else if ("--require-aa".equals(arg) || "--aa".equals(arg)) {
+        builder.requireAa(true);
+      } else if ("--corrupt-dg2".equals(arg)) {
+        builder.corruptDg2(true);
+      } else if ("--large-dg2".equals(arg)) {
+        builder.largeDg2(true);
+      } else if (arg.startsWith("--trust-store=") || arg.startsWith("--trust=")) {
+        String value = arg.contains("--trust-store=")
+            ? arg.substring("--trust-store=".length())
+            : arg.substring("--trust=".length());
+        builder.trustStorePath(Paths.get(value));
+      } else if (arg.startsWith("--trust-ml=")) {
+        builder.trustMasterList(Paths.get(arg.substring("--trust-ml=".length())));
+      } else if (arg.startsWith("--ta-cvc=")) {
+        builder.addTaCvc(Paths.get(arg.substring("--ta-cvc=".length())));
+      } else if (arg.startsWith("--ta-key=")) {
+        builder.taKey(Paths.get(arg.substring("--ta-key=".length())));
+      } else if (arg.startsWith("--ta-date=")) {
+        builder.terminalAuthDate(resolveTerminalAuthDate(arg.substring("--ta-date=".length())));
+      } else if (arg.startsWith("--can=")) {
+        builder.can(arg.substring("--can=".length()));
+      } else if (arg.startsWith("--pin=")) {
+        builder.pin(arg.substring("--pin=".length()));
+      } else if (arg.startsWith("--puk=")) {
+        builder.puk(arg.substring("--puk=".length()));
+      } else if ("--open-com-sod".equals(arg)) {
+        builder.openComSodReads(true);
+      } else if ("--secure-com-sod".equals(arg)) {
+        builder.openComSodReads(false);
+      }
+    }
+  }
+
+  private static LocalDate resolveTerminalAuthDate(String override) {
+    LocalDate defaultDate = LocalDate.now(ZoneOffset.UTC);
+    if (override == null || override.isBlank()) {
+      return defaultDate;
+    }
+    String trimmed = override.trim();
+    try {
+      return LocalDate.parse(trimmed, DateTimeFormatter.ISO_LOCAL_DATE);
+    } catch (Exception ignored) {
+      // continue
+    }
+    String digitsOnly = trimmed.replaceAll("[^0-9]", "");
+    if (digitsOnly.length() == 8) {
+      int year = Integer.parseInt(digitsOnly.substring(0, 4));
+      int month = Integer.parseInt(digitsOnly.substring(4, 6));
+      int day = Integer.parseInt(digitsOnly.substring(6, 8));
+      return LocalDate.of(year, month, day);
+    }
+    if (digitsOnly.length() == 6) {
+      int year = Integer.parseInt(digitsOnly.substring(0, 2));
+      int month = Integer.parseInt(digitsOnly.substring(2, 4));
+      int day = Integer.parseInt(digitsOnly.substring(4, 6));
+      int centuryBase = defaultDate.getYear() / 100 * 100;
+      int fullYear = centuryBase + year;
+      if (fullYear < defaultDate.getYear() - 50) {
+        fullYear += 100;
+      } else if (fullYear > defaultDate.getYear() + 50) {
+        fullYear -= 100;
+      }
+      return LocalDate.of(fullYear, month, day);
+    }
+    return defaultDate;
+  }
+
+  private static final class UiSimEvents implements SimEvents {
+    private final ScenarioExecutionListener listener;
+    private final String source;
+
+    UiSimEvents(ScenarioExecutionListener listener, String source) {
+      this.listener = listener;
+      this.source = source;
+    }
+
+    @Override
+    public void onPhase(SimPhase phase, String detail) {
+      listener.onPhase(phase, detail);
+    }
+
+    @Override
+    public void onLog(SimLogCategory category, String message) {
+      listener.onLog(category, source, message);
+    }
   }
 }
 

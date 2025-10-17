@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import emu.SessionReport;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,6 +41,25 @@ final class SessionReportParser {
         present,
         dg.dg3Readable,
         dg.dg4Readable);
+  }
+
+  static SessionReportViewData fromReport(SessionReport report) {
+    if (report == null || report.session == null) {
+      return null;
+    }
+    SessionReport.DataGroups dg = report.dataGroups != null ? report.dataGroups : new SessionReport.DataGroups();
+    List<Integer> present = dg.getPresent();
+    return new SessionReportViewData(
+        report.session.transport,
+        report.session.smMode,
+        report.session.paceAttempted,
+        report.session.paceEstablished,
+        report.session.caEstablished,
+        report.passiveAuth != null ? report.passiveAuth.verdict : null,
+        report.passiveAuth != null ? report.passiveAuth.algorithm : null,
+        present,
+        dg.isDg3Readable(),
+        dg.isDg4Readable());
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
