@@ -7,9 +7,9 @@ The table below captures the curated scenario presets and the CLI invocations th
 | Happy Path (Issuance + PA) | `ReadDG1Main --seed --require-pa` |
 | BAC Only (no PACE) | `ReadDG1Main --seed` |
 | PACE (MRZ) | `ReadDG1Main --seed --attempt-pace` |
-| PACE (CAN) | `ReadDG1Main --seed --attempt-pace --can=123456` |
-| PACE (PIN) | `ReadDG1Main --seed --attempt-pace --pin=123456` |
-| PACE (PUK) | `ReadDG1Main --seed --attempt-pace --puk=123456789` |
+| PACE (CAN) | `ReadDG1Main --seed --attempt-pace --can=123456` *(default CAN; override via advanced toggles)* |
+| PACE (PIN) | `ReadDG1Main --seed --attempt-pace --pin=123456` *(default PIN; override via advanced toggles)* |
+| PACE (PUK) | `ReadDG1Main --seed --attempt-pace --puk=123456789` *(default PUK; override via advanced toggles)* |
 | PACE Profile Preference (AES128) | `ReadDG1Main --seed --attempt-pace --pace-prefer=AES128` |
 | Chip Authentication Upgrade (CA) | `ReadDG1Main --seed --attempt-pace` (DG14 triggers CA automatically) |
 | Passive Auth: PASS | `ReadDG1Main --seed --require-pa` |

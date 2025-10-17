@@ -94,6 +94,10 @@ final class AdvancedOptionsSnapshot {
     return args;
   }
 
+  String getTrustStorePath() {
+    return trustStorePath;
+  }
+
   private static boolean hasText(String value) {
     return value != null && !value.isBlank();
   }
