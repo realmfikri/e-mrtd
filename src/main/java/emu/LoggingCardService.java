@@ -11,9 +11,11 @@ import net.sf.scuba.smartcards.ResponseAPDU;
 final class LoggingCardService extends CardService {
 
   private final CardService delegate;
+  private final SimEvents events;
 
-  LoggingCardService(CardService delegate) {
+  LoggingCardService(CardService delegate, SimEvents events) {
     this.delegate = delegate;
+    this.events = events != null ? events : new SimEvents() {};
   }
 
   @Override
@@ -52,19 +54,21 @@ final class LoggingCardService extends CardService {
   @Override
   public ResponseAPDU transmit(CommandAPDU apdu) throws CardServiceException {
     boolean protectedApdu = isSecureMessaging(apdu.getCLA());
-    System.out.printf("-> CLA=%02X INS=%02X P1=%02X P2=%02X Lc=%d Le=%d%s%n",
+    events.onLog(SimLogCategory.APDU, String.format(
+        "-> CLA=%02X INS=%02X P1=%02X P2=%02X Lc=%d Le=%d%s",
         apdu.getCLA() & 0xFF,
         apdu.getINS() & 0xFF,
         apdu.getP1() & 0xFF,
         apdu.getP2() & 0xFF,
         apdu.getNc(),
         apdu.getNe(),
-        protectedApdu ? " [SM]" : "");
+        protectedApdu ? " [SM]" : ""));
     ResponseAPDU response = delegate.transmit(apdu);
-    System.out.printf("<- SW=%04X dataLen=%d%s%n",
+    events.onLog(SimLogCategory.APDU, String.format(
+        "<- SW=%04X dataLen=%d%s",
         response.getSW(),
         response.getData().length,
-        protectedApdu ? " [protected]" : "");
+        protectedApdu ? " [protected]" : ""));
     return response;
   }
 

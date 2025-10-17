@@ -1,5 +1,11 @@
 package emu.ui;
 
+import emu.SimConfig;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -94,12 +100,64 @@ final class AdvancedOptionsSnapshot {
     return args;
   }
 
+  void applyToBuilder(SimConfig.Builder builder) {
+    if (hasText(documentNumber)) {
+      builder.docNumber(documentNumber);
+    }
+    if (hasText(dateOfBirth)) {
+      builder.dateOfBirth(dateOfBirth);
+    }
+    if (hasText(dateOfExpiry)) {
+      builder.dateOfExpiry(dateOfExpiry);
+    }
+    if (hasText(can)) {
+      builder.can(can);
+    }
+    if (hasText(pin)) {
+      builder.pin(pin);
+    }
+    if (hasText(puk)) {
+      builder.puk(puk);
+    }
+    if (hasText(pacePreference)) {
+      builder.pacePreference(pacePreference);
+    }
+    for (String cvc : taCvcPaths) {
+      if (hasText(cvc)) {
+        builder.addTaCvc(Paths.get(cvc));
+      }
+    }
+    if (hasText(taKeyPath)) {
+      builder.taKey(Paths.get(taKeyPath));
+    }
+    if (hasText(taDate)) {
+      builder.terminalAuthDate(parseDate(taDate));
+    }
+    if (hasText(trustStorePath)) {
+      builder.trustStorePath(Paths.get(trustStorePath));
+    }
+    if (openComSod) {
+      builder.openComSodReads(true);
+    }
+    if (secureComSod) {
+      builder.openComSodReads(false);
+    }
+  }
+
   String getTrustStorePath() {
     return trustStorePath;
   }
 
   private static boolean hasText(String value) {
     return value != null && !value.isBlank();
+  }
+
+  private static LocalDate parseDate(String value) {
+    try {
+      return LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE);
+    } catch (Exception e) {
+      return LocalDate.now();
+    }
   }
 }
 

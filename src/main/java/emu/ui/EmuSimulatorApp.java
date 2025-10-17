@@ -1,18 +1,26 @@
 package emu.ui;
 
+import emu.SessionReport;
+import emu.SimLogCategory;
+import emu.SimPhase;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.RadioButton;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
-import javafx.scene.control.TextArea;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
@@ -21,13 +29,21 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
+import javafx.util.Callback;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Objects;
 
@@ -38,9 +54,15 @@ public final class EmuSimulatorApp extends Application {
   private final ScenarioRunner runner = new ScenarioRunner();
   private final AdvancedOptionsPane advancedOptionsPane = new AdvancedOptionsPane();
 
-  private final TextArea logArea = new TextArea();
+  private Stage primaryStage;
+
+  private final ObservableList<LogEntry> logEntries = FXCollections.observableArrayList();
+  private final FilteredList<LogEntry> filteredLogs = new FilteredList<>(logEntries);
+  private final ListView<LogEntry> logListView = new ListView<>(filteredLogs);
+  private final ToggleGroup logFilterGroup = new ToggleGroup();
   private final Label statusLabel = new Label("Ready");
   private final Button copyCliButton = new Button("Copy CLI");
+  private final Button exportButton = new Button("Export session");
   private final Label scenarioDescription = new Label("Select a scenario to see details.");
 
   private final Label verdictValue = valueLabel();
@@ -51,15 +73,28 @@ public final class EmuSimulatorApp extends Application {
   private final ListView<String> dgListView = new ListView<>();
   private final Label dg3ReadableValue = valueLabel();
   private final Label dg4ReadableValue = valueLabel();
+  private final EnumMap<SimPhase, Label> phaseLabels = new EnumMap<>(SimPhase.class);
+  private final List<SimPhase> phaseOrder = List.of(
+      SimPhase.CONNECTING,
+      SimPhase.AUTHENTICATING,
+      SimPhase.READING,
+      SimPhase.VERIFYING,
+      SimPhase.COMPLETE);
+
+  private static final int MAX_LOG_ENTRIES = 2000;
 
   private Task<ScenarioResult> currentTask;
   private List<String> lastCommands = List.of();
+  private SessionReport lastReport;
+  private SimPhase currentPhase = SimPhase.CONNECTING;
+  private Path lastReportPath;
 
   @Override
   public void start(Stage stage) {
+    this.primaryStage = stage;
     BorderPane root = new BorderPane();
     root.setLeft(buildScenarioPane());
-    root.setCenter(buildResultTabs());
+    root.setCenter(buildResultPane());
     root.setBottom(buildStatusBar());
 
     Scene scene = new Scene(root, 1280, 720);
@@ -104,6 +139,28 @@ public final class EmuSimulatorApp extends Application {
     VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
     return container;
+  }
+
+  private VBox buildResultPane() {
+    VBox container = new VBox(12);
+    container.setPadding(new Insets(12));
+    HBox stepper = buildStepper();
+    TabPane tabs = buildResultTabs();
+    container.getChildren().addAll(stepper, tabs);
+    VBox.setVgrow(tabs, Priority.ALWAYS);
+    return container;
+  }
+
+  private HBox buildStepper() {
+    HBox stepper = new HBox(16);
+    stepper.setAlignment(Pos.CENTER_LEFT);
+    for (SimPhase phase : phaseOrder) {
+      Label label = new Label(formatPhaseLabel(phase, "○"));
+      label.getStyleClass().add("stepper-label");
+      phaseLabels.put(phase, label);
+      stepper.getChildren().add(label);
+    }
+    return stepper;
   }
 
   private TabPane buildResultTabs() {
@@ -152,11 +209,40 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private Tab buildLogTab() {
-    logArea.setEditable(false);
-    logArea.setWrapText(false);
-    logArea.setStyle("-fx-font-family: 'Consolas', 'Monospaced';");
+    HBox filters = new HBox(8);
+    filters.setAlignment(Pos.CENTER_LEFT);
+    RadioButton allButton = new RadioButton("All");
+    allButton.setToggleGroup(logFilterGroup);
+    allButton.setUserData(null);
+    allButton.setSelected(true);
+    RadioButton apduButton = new RadioButton("APDU");
+    apduButton.setToggleGroup(logFilterGroup);
+    apduButton.setUserData(SimLogCategory.APDU);
+    RadioButton securityButton = new RadioButton("Security");
+    securityButton.setToggleGroup(logFilterGroup);
+    securityButton.setUserData(SimLogCategory.SECURITY);
+    filters.getChildren().addAll(new Label("Filter:"), allButton, apduButton, securityButton);
 
-    Tab tab = new Tab("Technical Log", logArea);
+    logListView.setCellFactory(createLogCellFactory());
+    logListView.setPlaceholder(new Label("Logs will appear here during execution."));
+
+    VBox container = new VBox(8, filters, logListView);
+    VBox.setVgrow(logListView, Priority.ALWAYS);
+
+    logFilterGroup.selectedToggleProperty().addListener((obs, oldToggle, newToggle) -> {
+      if (newToggle == null) {
+        filteredLogs.setPredicate(log -> true);
+      } else {
+        SimLogCategory category = (SimLogCategory) newToggle.getUserData();
+        if (category == null) {
+          filteredLogs.setPredicate(log -> true);
+        } else {
+          filteredLogs.setPredicate(log -> log.getCategory() == category);
+        }
+      }
+    });
+
+    Tab tab = new Tab("Technical Log", container);
     tab.setClosable(false);
     return tab;
   }
@@ -180,8 +266,10 @@ public final class EmuSimulatorApp extends Application {
 
     copyCliButton.setDisable(true);
     copyCliButton.setOnAction(e -> copyLastCommands());
+    exportButton.setDisable(true);
+    exportButton.setOnAction(e -> exportSession());
 
-    bar.getChildren().addAll(statusLabel, copyCliButton);
+    bar.getChildren().addAll(statusLabel, copyCliButton, exportButton);
     return bar;
   }
 
@@ -192,15 +280,24 @@ public final class EmuSimulatorApp extends Application {
     }
 
     scenarioDescription.setText(preset.getDescription());
-    logArea.clear();
+    logEntries.clear();
+    if (!logFilterGroup.getToggles().isEmpty()) {
+      logFilterGroup.selectToggle(logFilterGroup.getToggles().get(0));
+    }
     clearSummary();
     clearDataGroups();
+    resetStepper();
+    lastReport = null;
+    lastReportPath = null;
+    copyCliButton.setDisable(true);
+    exportButton.setDisable(true);
     statusLabel.setText("Running " + preset.getName() + "...");
 
     AdvancedOptionsSnapshot options = advancedOptionsPane.snapshot();
     Path reportPath = buildReportPath(preset.getName());
 
-    currentTask = runner.createTask(preset, options, reportPath, this::appendLog);
+    UiScenarioListener listener = new UiScenarioListener();
+    currentTask = runner.createTask(preset, options, reportPath, listener);
     currentTask.setOnSucceeded(e -> handleCompletion(currentTask.getValue()));
     currentTask.setOnFailed(e -> handleFailure(preset.getName(), currentTask.getException()));
     currentTask.setOnCancelled(e -> statusLabel.setText("Cancelled"));
@@ -213,6 +310,7 @@ public final class EmuSimulatorApp extends Application {
   private void handleCompletion(ScenarioResult result) {
     lastCommands = result.getCommands();
     copyCliButton.setDisable(lastCommands.isEmpty());
+    lastReportPath = result.getReportPath();
 
     if (!result.isSuccess()) {
       String failureMsg = "Scenario failed";
@@ -221,39 +319,74 @@ public final class EmuSimulatorApp extends Application {
       }
       failureMsg += " (exit code " + result.getExitCode() + ")";
       statusLabel.setText(failureMsg);
+      exportButton.setDisable(true);
       return;
     }
 
     statusLabel.setText("Completed successfully");
 
-    try {
-      SessionReportViewData viewData = SessionReportParser.parse(result.getReportPath());
+    SessionReport report = result.getReport();
+    if (report == null) {
+      report = lastReport;
+    }
+    if (report != null) {
+      SessionReportViewData viewData = SessionReportParser.fromReport(report);
       if (viewData != null) {
         updateSummary(viewData);
         updateDataGroups(viewData);
-      } else {
-        statusLabel.setText("Completed (no report found)");
       }
-    } catch (Exception ex) {
-      statusLabel.setText("Completed (report parse error)");
-      appendLog("[UI] Failed to parse report: " + ex.getMessage());
+      lastReport = report;
+      exportButton.setDisable(false);
+    } else {
+      try {
+        SessionReportViewData viewData = SessionReportParser.parse(result.getReportPath());
+        if (viewData != null) {
+          updateSummary(viewData);
+          updateDataGroups(viewData);
+          exportButton.setDisable(false);
+        } else {
+          statusLabel.setText("Completed (no report found)");
+          exportButton.setDisable(true);
+        }
+      } catch (Exception ex) {
+        statusLabel.setText("Completed (report parse error)");
+        addLogEntry(SimLogCategory.GENERAL, "UI", "Failed to parse report: " + ex.getMessage());
+        exportButton.setDisable(true);
+      }
     }
   }
 
   private void handleFailure(String scenarioName, Throwable throwable) {
     lastCommands = List.of();
     copyCliButton.setDisable(true);
+    exportButton.setDisable(true);
     statusLabel.setText("Error running " + scenarioName + "); see log.");
-    appendLog("[UI] " + throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
+    addLogEntry(SimLogCategory.GENERAL, "UI", throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
   }
 
-  private void appendLog(String message) {
-    Platform.runLater(() -> {
-      if (!logArea.getText().isEmpty()) {
-        logArea.appendText(System.lineSeparator());
+  private Callback<ListView<LogEntry>, ListCell<LogEntry>> createLogCellFactory() {
+    return list -> new ListCell<>() {
+      @Override
+      protected void updateItem(LogEntry entry, boolean empty) {
+        super.updateItem(entry, empty);
+        if (empty || entry == null) {
+          setText(null);
+        } else {
+          setText(formatLogEntry(entry));
+        }
       }
-      logArea.appendText(message);
-    });
+    };
+  }
+
+  private void addLogEntry(SimLogCategory category, String source, String message) {
+    LogEntry entry = new LogEntry(category, source, message);
+    logEntries.add(entry);
+    if (logEntries.size() > MAX_LOG_ENTRIES) {
+      logEntries.remove(0);
+    }
+    if (!logEntries.isEmpty()) {
+      logListView.scrollTo(logEntries.size() - 1);
+    }
   }
 
   private void updateSummary(SessionReportViewData data) {
@@ -292,6 +425,54 @@ public final class EmuSimulatorApp extends Application {
     dg4ReadableValue.setText("—");
   }
 
+  private void resetStepper() {
+    for (SimPhase phase : phaseOrder) {
+      Label label = phaseLabels.get(phase);
+      if (label != null) {
+        label.setText(formatPhaseLabel(phase, "○"));
+      }
+    }
+    currentPhase = SimPhase.CONNECTING;
+  }
+
+  private void updatePhaseIndicator(SimPhase phase, String detail) {
+    if (phase == SimPhase.FAILED) {
+      Label label = phaseLabels.get(currentPhase);
+      if (label != null) {
+        label.setText(formatPhaseLabel(currentPhase, "✕"));
+      }
+      if (detail != null && !detail.isBlank()) {
+        statusLabel.setText(detail);
+      }
+      return;
+    }
+
+    int phaseIndex = phaseOrder.indexOf(phase);
+    if (phaseIndex < 0) {
+      return;
+    }
+
+    currentPhase = phase;
+    for (int i = 0; i < phaseOrder.size(); i++) {
+      SimPhase iter = phaseOrder.get(i);
+      Label label = phaseLabels.get(iter);
+      if (label == null) {
+        continue;
+      }
+      if (i < phaseIndex) {
+        label.setText(formatPhaseLabel(iter, "✓"));
+      } else if (i == phaseIndex) {
+        label.setText(formatPhaseLabel(iter, phase == SimPhase.COMPLETE ? "✓" : "●"));
+      } else {
+        label.setText(formatPhaseLabel(iter, "○"));
+      }
+    }
+
+    if (detail != null && !detail.isBlank()) {
+      statusLabel.setText(detail);
+    }
+  }
+
   private void copyLastCommands() {
     if (lastCommands.isEmpty()) {
       return;
@@ -309,6 +490,74 @@ public final class EmuSimulatorApp extends Application {
         .replaceAll("^-|-$", "");
     String fileName = safeName + "-" + REPORT_TIMESTAMP.format(LocalDateTime.now()) + ".json";
     return Paths.get("target", "ui-session", fileName);
+  }
+
+  private void exportSession() {
+    if (lastReport == null && (lastReportPath == null || !Files.exists(lastReportPath))) {
+      statusLabel.setText("No session to export yet");
+      return;
+    }
+
+    DirectoryChooser chooser = new DirectoryChooser();
+    chooser.setTitle("Export session");
+    File chosen = chooser.showDialog(primaryStage);
+    if (chosen == null) {
+      return;
+    }
+
+    Path targetDir = chosen.toPath();
+    String timestamp = REPORT_TIMESTAMP.format(LocalDateTime.now());
+    Path jsonPath = targetDir.resolve("session-report-" + timestamp + ".json");
+    Path logPath = targetDir.resolve("session-log-" + timestamp + ".txt");
+    Path cliPath = targetDir.resolve("session-cli-" + timestamp + ".txt");
+
+    try {
+      Files.createDirectories(targetDir);
+      if (lastReport != null) {
+        lastReport.write(jsonPath);
+      } else if (lastReportPath != null && Files.exists(lastReportPath)) {
+        Files.copy(lastReportPath, jsonPath, StandardCopyOption.REPLACE_EXISTING);
+      }
+
+      StringBuilder logBuilder = new StringBuilder();
+      for (LogEntry entry : logEntries) {
+        logBuilder.append(formatLogEntry(entry)).append(System.lineSeparator());
+      }
+      Files.writeString(logPath, logBuilder.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+
+      if (!lastCommands.isEmpty()) {
+        Files.writeString(
+            cliPath,
+            String.join(System.lineSeparator(), lastCommands),
+            StandardOpenOption.CREATE,
+            StandardOpenOption.TRUNCATE_EXISTING);
+      }
+
+      statusLabel.setText("Exported session to " + targetDir.toAbsolutePath());
+      addLogEntry(SimLogCategory.GENERAL, "UI", "Session exported to " + targetDir.toAbsolutePath());
+    } catch (IOException e) {
+      statusLabel.setText("Failed to export session");
+      addLogEntry(SimLogCategory.GENERAL, "UI", "Export failed: " + e.getMessage());
+    }
+  }
+
+  private static String formatPhaseLabel(SimPhase phase, String indicator) {
+    return indicator + " " + phaseDisplayName(phase);
+  }
+
+  private static String phaseDisplayName(SimPhase phase) {
+    String name = phase.name().toLowerCase().replace('_', ' ');
+    return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+  }
+
+  private String formatLogEntry(LogEntry entry) {
+    StringBuilder sb = new StringBuilder();
+    sb.append('[').append(entry.getCategory().name()).append(']');
+    if (entry.getSource() != null && !entry.getSource().isBlank()) {
+      sb.append(' ').append('[').append(entry.getSource()).append(']');
+    }
+    sb.append(' ').append(entry.getMessage());
+    return sb.toString();
   }
 
   private static void addSummaryRow(GridPane grid, int row, String labelText, Label value) {
@@ -332,6 +581,23 @@ public final class EmuSimulatorApp extends Application {
 
   private static String orDefault(String value) {
     return (value == null || value.isBlank()) ? "—" : value;
+  }
+
+  private final class UiScenarioListener implements ScenarioExecutionListener {
+    @Override
+    public void onLog(SimLogCategory category, String source, String message) {
+      Platform.runLater(() -> addLogEntry(category, source, message));
+    }
+
+    @Override
+    public void onPhase(SimPhase phase, String detail) {
+      Platform.runLater(() -> updatePhaseIndicator(phase, detail));
+    }
+
+    @Override
+    public void onReport(SessionReport report) {
+      Platform.runLater(() -> lastReport = report);
+    }
   }
 
   public static void main(String[] args) {

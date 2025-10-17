@@ -8,6 +8,7 @@
   <properties>
     <maven.compiler.release>11</maven.compiler.release>
     <javafx.version>21.0.3</javafx.version>
+    <javafx.plugin.version>0.0.8</javafx.plugin.version>
     <jackson.version>2.17.1</jackson.version>
   </properties>
 
@@ -99,7 +100,7 @@
       <plugin>
         <groupId>org.openjfx</groupId>
         <artifactId>javafx-maven-plugin</artifactId>
-        <version>${javafx.version}</version>
+        <version>${javafx.plugin.version}</version>
         <configuration>
           <mainClass>emu.ui.EmuSimulatorApp</mainClass>
         </configuration>
