@@ -125,9 +125,13 @@ class Module8IntegrationTest {
     Result result = PassiveAuthentication.verify(service, masterList, null);
     assertTrue(result.getChainValidation().chainOk, "Chain validation should succeed with master list directory");
     assertTrue(result.getSignatureCheck().valid, "SOD signature should validate with trust anchor");
-    assertTrue(result.getMissingDataGroups().containsAll(List.of(3, 4, 14, 15)),
-        "DG3/DG4/DG14/DG15 should be reported missing without TA");
-    assertFalse(result.isPass(), "Overall PA verdict remains false until restricted DGs are accessible");
+    assertTrue(result.getOkDataGroups().containsAll(List.of(1, 2)),
+        "DG1/DG2 should be hashed successfully");
+    assertTrue(result.getLockedDataGroups().containsAll(List.of(3, 4, 14, 15)),
+        "DG3/DG4/DG14/DG15 should be reported as locked without TA");
+    assertTrue(result.getMissingDataGroups().isEmpty(),
+        "Locked DGs must not be treated as missing");
+    assertTrue(result.isPass(), "Locked DGs should not cause PA to fail");
   }
 
   @Test

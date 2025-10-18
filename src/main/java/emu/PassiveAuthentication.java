@@ -69,10 +69,12 @@ public final class PassiveAuthentication {
   }
 
   public static Result verify(PassportService service, List<Path> trustStorePaths, char[] trustStorePassword) throws Exception {
-    byte[] sodBytes = readFile(service, PassportService.EF_SOD);
-    if (sodBytes == null) {
-      return Result.failed("EF.SOD missing", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+    FileReadResult sodResult = readFile(service, PassportService.EF_SOD);
+    if (sodResult.status != FileStatus.OK || sodResult.data == null) {
+      String issue = sodResult.status == FileStatus.LOCKED ? "EF.SOD locked" : "EF.SOD missing";
+      return Result.failed(issue, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     }
+    byte[] sodBytes = sodResult.data;
 
     SODFile sod = new SODFile(new ByteArrayInputStream(sodBytes));
     String digestAlgorithm = normalizeDigestAlgorithm(sod.getDigestAlgorithm());
@@ -83,17 +85,22 @@ public final class PassiveAuthentication {
     List<Integer> okDataGroups = new ArrayList<>();
     List<Integer> badDataGroups = new ArrayList<>();
     List<Integer> missingDataGroups = new ArrayList<>();
+    List<Integer> lockedDataGroups = new ArrayList<>();
 
     for (Map.Entry<Integer, byte[]> entry : expectedHashes.entrySet()) {
       int dg = entry.getKey();
-      byte[] actual = readDataGroup(service, dg);
-      if (actual == null) {
+      FileReadResult dataGroup = readDataGroup(service, dg);
+      if (dataGroup.status == FileStatus.LOCKED) {
+        lockedDataGroups.add(dg);
+        continue;
+      }
+      if (dataGroup.status != FileStatus.OK || dataGroup.data == null) {
         missingDataGroups.add(dg);
         continue;
       }
       try {
         MessageDigest md = MessageDigest.getInstance(digestAlgorithm);
-        byte[] digest = md.digest(actual);
+        byte[] digest = md.digest(dataGroup.data);
         if (Arrays.equals(digest, entry.getValue())) {
           okDataGroups.add(dg);
         } else {
@@ -119,6 +126,7 @@ public final class PassiveAuthentication {
         Collections.unmodifiableList(okDataGroups),
         Collections.unmodifiableList(badDataGroups),
         Collections.unmodifiableList(missingDataGroups),
+        Collections.unmodifiableList(lockedDataGroups),
         signatureCheck,
         chainValidation,
         comTags,
@@ -126,32 +134,50 @@ public final class PassiveAuthentication {
         pass);
   }
 
-  private static byte[] readFile(PassportService service, short fid) throws IOException {
+  private static FileReadResult readFile(PassportService service, short fid) throws IOException {
     try {
       InputStream raw = service.getInputStream(fid);
       if (raw == null) {
-        return null;
+        return FileReadResult.missing();
       }
       try (InputStream in = raw; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
         byte[] buf = new byte[256];
         int r;
-        while ((r = in.read(buf)) != -1) {
+        while (true) {
+          try {
+            r = in.read(buf);
+          } catch (IOException io) {
+            CardServiceException cardError = findCardServiceException(io);
+            if (cardError != null) {
+              if (isSecurityStatusError(cardError)) {
+                return FileReadResult.locked();
+              }
+              return FileReadResult.missing();
+            }
+            throw io;
+          }
+          if (r == -1) {
+            break;
+          }
           out.write(buf, 0, r);
         }
-        return out.toByteArray();
+        return FileReadResult.ok(out.toByteArray());
       }
     } catch (CardServiceException e) {
-      return null;
+      if (isSecurityStatusError(e)) {
+        return FileReadResult.locked();
+      }
+      return FileReadResult.missing();
     }
   }
 
   private static Set<Integer> readComTagList(PassportService service) {
     try {
-      byte[] comBytes = readFile(service, PassportService.EF_COM);
-      if (comBytes == null) {
+      FileReadResult comResult = readFile(service, PassportService.EF_COM);
+      if (comResult.status != FileStatus.OK || comResult.data == null) {
         return Collections.emptySet();
       }
-      COMFile com = new COMFile(new ByteArrayInputStream(comBytes));
+      COMFile com = new COMFile(new ByteArrayInputStream(comResult.data));
       int[] tags = com.getTagList();
       Set<Integer> tagSet = new TreeSet<>();
       if (tags != null) {
@@ -165,12 +191,68 @@ public final class PassiveAuthentication {
     }
   }
 
-  private static byte[] readDataGroup(PassportService service, int dataGroup) {
+  private static FileReadResult readDataGroup(PassportService service, int dataGroup) {
     short fid = (short) (0x0100 | (dataGroup & 0xFF));
     try {
       return readFile(service, fid);
     } catch (Exception e) {
-      return null;
+      return FileReadResult.missing();
+    }
+  }
+
+  private static boolean isSecurityStatusError(CardServiceException e) {
+    int sw = e.getSW();
+    if (sw == 0x6982 || sw == 0x6985 || sw == 0x6988) {
+      return true;
+    }
+    if (sw == CardServiceException.SW_NONE) {
+      String message = e.getMessage();
+      if (message != null) {
+        String lower = message.toLowerCase(Locale.ROOT);
+        return lower.contains("access to file denied")
+            || lower.contains("security status")
+            || lower.contains("no response apdu");
+      }
+    }
+    return false;
+  }
+
+  private static CardServiceException findCardServiceException(Throwable throwable) {
+    Throwable current = throwable;
+    while (current != null) {
+      if (current instanceof CardServiceException) {
+        return (CardServiceException) current;
+      }
+      current = current.getCause();
+    }
+    return null;
+  }
+
+  private enum FileStatus {
+    OK,
+    MISSING,
+    LOCKED
+  }
+
+  private static final class FileReadResult {
+    final FileStatus status;
+    final byte[] data;
+
+    private FileReadResult(FileStatus status, byte[] data) {
+      this.status = status;
+      this.data = data;
+    }
+
+    static FileReadResult ok(byte[] data) {
+      return new FileReadResult(FileStatus.OK, data);
+    }
+
+    static FileReadResult missing() {
+      return new FileReadResult(FileStatus.MISSING, null);
+    }
+
+    static FileReadResult locked() {
+      return new FileReadResult(FileStatus.LOCKED, null);
     }
   }
 
@@ -459,6 +541,7 @@ public final class PassiveAuthentication {
     private final List<Integer> okDataGroups;
     private final List<Integer> badDataGroups;
     private final List<Integer> missingDataGroups;
+    private final List<Integer> lockedDataGroups;
     private final SignatureCheck signatureCheck;
     private final ChainValidation chainValidation;
     private final Set<Integer> comTagList;
@@ -469,6 +552,7 @@ public final class PassiveAuthentication {
            List<Integer> okDataGroups,
            List<Integer> badDataGroups,
            List<Integer> missingDataGroups,
+           List<Integer> lockedDataGroups,
            SignatureCheck signatureCheck,
            ChainValidation chainValidation,
            Set<Integer> comTagList,
@@ -478,6 +562,7 @@ public final class PassiveAuthentication {
       this.okDataGroups = okDataGroups;
       this.badDataGroups = badDataGroups;
       this.missingDataGroups = missingDataGroups;
+      this.lockedDataGroups = lockedDataGroups;
       this.signatureCheck = signatureCheck;
       this.chainValidation = chainValidation;
       this.comTagList = comTagList;
@@ -499,6 +584,10 @@ public final class PassiveAuthentication {
 
     public List<Integer> getMissingDataGroups() {
       return missingDataGroups;
+    }
+
+    public List<Integer> getLockedDataGroups() {
+      return lockedDataGroups;
     }
 
     public SignatureCheck getSignatureCheck() {
@@ -531,6 +620,7 @@ public final class PassiveAuthentication {
       System.out.println("DG OK : " + okDataGroups);
       System.out.println("DG BAD: " + badDataGroups);
       System.out.println("DG MISS: " + missingDataGroups);
+      System.out.println("DG LOCK: " + lockedDataGroups);
       if (!comTagList.isEmpty()) {
         System.out.println("COM tags: " + comTagList);
       }
@@ -559,9 +649,13 @@ public final class PassiveAuthentication {
       System.out.println("--------------------------------");
     }
 
-    static Result failed(String message, List<Integer> ok, List<Integer> bad, List<Integer> missing) {
+    static Result failed(String message,
+                         List<Integer> ok,
+                         List<Integer> bad,
+                         List<Integer> missing,
+                         List<Integer> locked) {
       SignatureCheck sig = SignatureCheck.invalid(message);
-      return new Result("-", ok, bad, missing, sig,
+      return new Result("-", ok, bad, missing, locked, sig,
           new ChainValidation(false, message, Collections.emptyList()),
           Collections.emptySet(), Collections.emptyList(), false);
     }
