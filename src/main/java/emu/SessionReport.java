@@ -82,6 +82,7 @@ public final class SessionReport {
     public final List<Integer> ok;
     public final List<Integer> bad;
     public final List<Integer> missing;
+    public final List<Integer> locked;
     public final String signer;
     public final String chainStatus;
     public final String verdict;
@@ -91,6 +92,7 @@ public final class SessionReport {
                 List<Integer> ok,
                 List<Integer> bad,
                 List<Integer> missing,
+                List<Integer> locked,
                 String signer,
                 String chainStatus,
                 String verdict) {
@@ -99,6 +101,7 @@ public final class SessionReport {
       this.ok = ok;
       this.bad = bad;
       this.missing = missing;
+      this.locked = locked;
       this.signer = signer;
       this.chainStatus = chainStatus;
       this.verdict = verdict;
@@ -122,13 +125,14 @@ public final class SessionReport {
           result.getOkDataGroups(),
           result.getBadDataGroups(),
           result.getMissingDataGroups(),
+          result.getLockedDataGroups(),
           signer,
           chainStatus,
           result.verdict());
     }
 
     static PassiveAuth notRun() {
-      return new PassiveAuth(false, null, List.of(), List.of(), List.of(), null, null, "SKIPPED");
+      return new PassiveAuth(false, null, List.of(), List.of(), List.of(), List.of(), null, null, "SKIPPED");
     }
 
     String toJson(String indent) {
@@ -139,6 +143,7 @@ public final class SessionReport {
       sb.append("\"okDGs\":").append(intList(ok)).append(',');
       sb.append("\"badDGs\":").append(intList(bad)).append(',');
       sb.append("\"missingDGs\":").append(intList(missing)).append(',');
+      sb.append("\"lockedDGs\":").append(intList(locked)).append(',');
       sb.append("\"signer\":").append(toJsonString(signer)).append(',');
       sb.append("\"chainStatus\":").append(toJsonString(chainStatus)).append(',');
       sb.append("\"verdict\":").append(toJsonString(verdict));

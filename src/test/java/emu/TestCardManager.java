@@ -141,12 +141,11 @@ final class TestCardManager {
     putData(channel, 0x00, 0x62, mrzSeed);
     seedActiveAuthenticationKey(channel, artifacts.aaKeyPair.getPrivate());
 
-    if (enableOpenReads) {
-      putData(channel, 0xDE, 0xFE, new byte[]{0x01});
-    }
-
     putData(channel, 0xDE, 0xAF, new byte[0]);
     putData(channel, 0xDE, 0xAD, new byte[0]);
+
+    byte openReadMode = enableOpenReads ? (byte) 0x01 : (byte) 0x00;
+    putData(channel, 0xDE, 0xFE, new byte[]{openReadMode});
 
     card.disconnect(false);
 
