@@ -64,6 +64,7 @@ public final class EmuSimulatorApp extends Application {
   private final Button copyCliButton = new Button("Copy CLI");
   private final Button copySessionInfoButton = new Button("Copy session info");
   private final Button exportButton = new Button("Export session");
+  private final Button runAllButton = new Button("Run all tests");
   private final Label scenarioDescription = new Label("Select a scenario to see details.");
 
   private final Label verdictValue = valueLabel();
@@ -90,6 +91,11 @@ public final class EmuSimulatorApp extends Application {
   private SessionReport lastReport;
   private SimPhase currentPhase = SimPhase.CONNECTING;
   private Path lastReportPath;
+  private ScenarioResult lastScenarioResult;
+  private Throwable lastScenarioException;
+  private Runnable afterScenarioCallback;
+  private BatchRunState batchRunState;
+  private VBox scenarioButtonsBox;
 
   @Override
   public void start(Stage stage) {
@@ -120,24 +126,27 @@ public final class EmuSimulatorApp extends Application {
     Label header = new Label("Scenario presets");
     header.getStyleClass().add("header-label");
 
-    VBox buttonsBox = new VBox(8);
+    scenarioButtonsBox = new VBox(8);
     for (ScenarioPreset preset : ScenarioPresets.all()) {
       Button button = new Button(preset.getName());
       button.setMaxWidth(Double.MAX_VALUE);
       button.setWrapText(true);
       button.setTooltip(new Tooltip(preset.getDescription()));
       button.setOnAction(e -> runScenario(preset));
-      buttonsBox.getChildren().add(button);
+      scenarioButtonsBox.getChildren().add(button);
     }
 
-    ScrollPane scrollPane = new ScrollPane(buttonsBox);
+    runAllButton.setMaxWidth(Double.MAX_VALUE);
+    runAllButton.setOnAction(e -> runAllScenarios());
+
+    ScrollPane scrollPane = new ScrollPane(scenarioButtonsBox);
     scrollPane.setFitToWidth(true);
     scrollPane.setPrefHeight(400);
 
     scenarioDescription.setWrapText(true);
     scenarioDescription.setPadding(new Insets(8, 0, 0, 0));
 
-    container.getChildren().addAll(header, scrollPane, scenarioDescription, advancedOptionsPane);
+    container.getChildren().addAll(header, runAllButton, scrollPane, scenarioDescription, advancedOptionsPane);
     VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
     return container;
@@ -277,10 +286,24 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private void runScenario(ScenarioPreset preset) {
+    startScenario(preset, advancedOptionsPane.snapshot(), null);
+  }
+
+  private void startScenario(
+      ScenarioPreset preset,
+      AdvancedOptionsSnapshot options,
+      Runnable completionCallback) {
     Objects.requireNonNull(preset, "preset");
+    Objects.requireNonNull(options, "options");
+
     if (currentTask != null && currentTask.isRunning()) {
-      currentTask.cancel(true);
+      statusLabel.setText("A scenario is already running; please wait");
+      return;
     }
+
+    afterScenarioCallback = completionCallback;
+    lastScenarioResult = null;
+    lastScenarioException = null;
 
     scenarioDescription.setText(preset.getDescription());
     logEntries.clear();
@@ -295,23 +318,183 @@ public final class EmuSimulatorApp extends Application {
     copyCliButton.setDisable(true);
     copySessionInfoButton.setDisable(true);
     exportButton.setDisable(true);
+    runAllButton.setDisable(true);
     statusLabel.setText("Running " + preset.getName() + "...");
 
-    AdvancedOptionsSnapshot options = advancedOptionsPane.snapshot();
     Path reportPath = buildReportPath(preset.getName());
 
     UiScenarioListener listener = new UiScenarioListener();
     currentTask = runner.createTask(preset, options, reportPath, listener);
     currentTask.setOnSucceeded(e -> handleCompletion(currentTask.getValue()));
     currentTask.setOnFailed(e -> handleFailure(preset.getName(), currentTask.getException()));
-    currentTask.setOnCancelled(e -> statusLabel.setText("Cancelled"));
+    currentTask.setOnCancelled(e -> {
+      statusLabel.setText("Cancelled");
+      finishScenario();
+    });
 
     Thread thread = new Thread(currentTask, "scenario-runner");
     thread.setDaemon(true);
     thread.start();
   }
 
+  private void runAllScenarios() {
+    if (batchRunState != null) {
+      statusLabel.setText("Already running all tests");
+      return;
+    }
+    if (currentTask != null && currentTask.isRunning()) {
+      statusLabel.setText("Finish current scenario before running all tests");
+      return;
+    }
+
+    List<ScenarioPreset> presets = new ArrayList<>(ScenarioPresets.all());
+    if (presets.isEmpty()) {
+      statusLabel.setText("No scenarios available to run");
+      return;
+    }
+
+    AdvancedOptionsSnapshot options = advancedOptionsPane.snapshot();
+    batchRunState = new BatchRunState(presets, options);
+    if (scenarioButtonsBox != null) {
+      scenarioButtonsBox.setDisable(true);
+    }
+    runAllButton.setDisable(true);
+    statusLabel.setText("Running all tests...");
+    runNextScenarioInBatch();
+  }
+
+  private void runNextScenarioInBatch() {
+    if (batchRunState == null) {
+      return;
+    }
+    if (batchRunState.index >= batchRunState.presets.size()) {
+      finishBatchRun();
+      return;
+    }
+
+    ScenarioPreset preset = batchRunState.presets.get(batchRunState.index);
+    startScenario(preset, batchRunState.options, () -> {
+      String summary = buildBatchSummary(preset);
+      batchRunState.summaries.add(summary);
+      batchRunState.index++;
+      runNextScenarioInBatch();
+    });
+  }
+
+  private void finishBatchRun() {
+    if (batchRunState == null) {
+      return;
+    }
+    boolean clipboardSuccess = false;
+    Path summaryPath = null;
+    if (!batchRunState.summaries.isEmpty()) {
+      String joinedSummaries = joinBatchSummaries(batchRunState.summaries);
+      clipboardSuccess = copyBatchSummariesToClipboard(joinedSummaries);
+      summaryPath = writeBatchSummariesToFile(joinedSummaries);
+    }
+    if (scenarioButtonsBox != null) {
+      scenarioButtonsBox.setDisable(false);
+    }
+    runAllButton.setDisable(false);
+    if (summaryPath != null) {
+      String message = clipboardSuccess
+          ? "Completed all tests; summary copied to clipboard and saved to " + summaryPath
+          : "Completed all tests; summary saved to " + summaryPath;
+      statusLabel.setText(message);
+    } else if (clipboardSuccess) {
+      statusLabel.setText("Completed all tests; summary copied to clipboard");
+    } else {
+      statusLabel.setText("Completed all tests");
+    }
+    addLogEntry(SimLogCategory.GENERAL, "UI", "All scenario tests finished");
+    batchRunState = null;
+  }
+
+  private String buildBatchSummary(ScenarioPreset preset) {
+    String newline = System.lineSeparator();
+    StringBuilder sb = new StringBuilder();
+    sb.append("Scenario: ").append(preset.getName()).append(newline);
+    sb.append("Explanation: ").append(preset.getDescription()).append(newline);
+
+    if (lastScenarioResult != null) {
+      if (lastScenarioResult.isSuccess()) {
+        sb.append("Outcome: Success").append(newline);
+        sb.append(buildSessionInfoText("  ")).append(newline);
+      } else {
+        sb.append("Outcome: Failed");
+        if (lastScenarioResult.getFailedStep() != null) {
+          sb.append(" at ").append(lastScenarioResult.getFailedStep());
+        }
+        sb.append(" (exit code ").append(lastScenarioResult.getExitCode()).append(")").append(newline);
+        if (!lastScenarioResult.getCommands().isEmpty()) {
+          sb.append("  Commands executed:").append(newline);
+          for (String cmd : lastScenarioResult.getCommands()) {
+            sb.append("    $").append(' ').append(cmd).append(newline);
+          }
+        }
+        sb.append(buildSessionInfoText("  ")).append(newline);
+      }
+    } else if (lastScenarioException != null) {
+      sb.append("Outcome: Error - ")
+          .append(lastScenarioException.getClass().getSimpleName())
+          .append(": ")
+          .append(lastScenarioException.getMessage())
+          .append(newline);
+      sb.append(buildSessionInfoText("  ")).append(newline);
+    } else {
+      sb.append("Outcome: Cancelled").append(newline);
+      sb.append(buildSessionInfoText("  ")).append(newline);
+    }
+
+    return sb.toString().stripTrailing();
+  }
+
+  private String joinBatchSummaries(List<String> summaries) {
+    String newline = System.lineSeparator();
+    return String.join(newline + newline, summaries);
+  }
+
+  private boolean copyBatchSummariesToClipboard(String joined) {
+    try {
+      ClipboardContent content = new ClipboardContent();
+      content.putString(joined);
+      Clipboard.getSystemClipboard().setContent(content);
+      return true;
+    } catch (RuntimeException ex) {
+      addLogEntry(
+          SimLogCategory.GENERAL,
+          "UI",
+          "Unable to copy batch summary to clipboard: " + ex.getMessage());
+      return false;
+    }
+  }
+
+  private Path writeBatchSummariesToFile(String joined) {
+    Path directory = Paths.get("target", "ui-session");
+    try {
+      Files.createDirectories(directory);
+      String fileName = "batch-summary-" + REPORT_TIMESTAMP.format(LocalDateTime.now()) + ".txt";
+      Path destination = directory.resolve(fileName);
+      Files.writeString(
+          destination,
+          joined,
+          StandardOpenOption.CREATE,
+          StandardOpenOption.TRUNCATE_EXISTING,
+          StandardOpenOption.WRITE);
+      return destination;
+    } catch (IOException ex) {
+      addLogEntry(
+          SimLogCategory.GENERAL,
+          "UI",
+          "Unable to write batch summary to file: " + ex.getMessage());
+      return null;
+    }
+  }
+
   private void handleCompletion(ScenarioResult result) {
+    lastScenarioResult = result;
+    lastScenarioException = null;
+
     lastCommands = result.getCommands();
     copyCliButton.setDisable(lastCommands.isEmpty());
     lastReportPath = result.getReportPath();
@@ -325,6 +508,7 @@ public final class EmuSimulatorApp extends Application {
       statusLabel.setText(failureMsg);
       exportButton.setDisable(true);
       copySessionInfoButton.setDisable(false);
+      finishScenario();
       return;
     }
 
@@ -363,15 +547,38 @@ public final class EmuSimulatorApp extends Application {
         copySessionInfoButton.setDisable(false);
       }
     }
+
+    finishScenario();
   }
 
   private void handleFailure(String scenarioName, Throwable throwable) {
+    lastScenarioResult = null;
+    lastScenarioException = throwable;
+
     lastCommands = List.of();
     copyCliButton.setDisable(true);
     exportButton.setDisable(true);
     statusLabel.setText("Error running " + scenarioName + "); see log.");
     addLogEntry(SimLogCategory.GENERAL, "UI", throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
     copySessionInfoButton.setDisable(false);
+    finishScenario();
+  }
+
+  private void finishScenario() {
+    currentTask = null;
+
+    Runnable callback = afterScenarioCallback;
+    afterScenarioCallback = null;
+    if (callback != null) {
+      callback.run();
+    }
+
+    if (batchRunState == null) {
+      runAllButton.setDisable(false);
+      if (scenarioButtonsBox != null) {
+        scenarioButtonsBox.setDisable(false);
+      }
+    }
   }
 
   private Callback<ListView<LogEntry>, ListCell<LogEntry>> createLogCellFactory() {
@@ -494,50 +701,58 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private void copySessionInfo() {
+    String summary = buildSessionInfoText("");
+    ClipboardContent content = new ClipboardContent();
+    content.putString(summary);
+    Clipboard.getSystemClipboard().setContent(content);
+    statusLabel.setText("Session info copied to clipboard");
+  }
+
+  private String buildSessionInfoText(String indent) {
     String newline = System.lineSeparator();
+    String baseIndent = indent == null ? "" : indent;
+    String levelOne = baseIndent + "  ";
+
     StringBuilder sb = new StringBuilder();
 
-    sb.append("Summary").append(newline);
-    sb.append("  Passive Auth verdict: ").append(verdictValue.getText()).append(newline);
-    sb.append("  Secure messaging: ").append(smModeValue.getText()).append(newline);
-    sb.append("  PACE: ").append(paceValue.getText()).append(newline);
-    sb.append("  Chip Authentication: ").append(caValue.getText()).append(newline).append(newline);
+    sb.append(baseIndent).append("Summary").append(newline);
+    sb.append(levelOne).append("Passive Auth verdict: ").append(verdictValue.getText()).append(newline);
+    sb.append(levelOne).append("Secure messaging: ").append(smModeValue.getText()).append(newline);
+    sb.append(levelOne).append("PACE: ").append(paceValue.getText()).append(newline);
+    sb.append(levelOne).append("Chip Authentication: ").append(caValue.getText()).append(newline).append(newline);
 
-    sb.append("Data Groups").append(newline);
+    sb.append(baseIndent).append("Data Groups").append(newline);
     if (dgListView.getItems().isEmpty()) {
-      sb.append("  (none)").append(newline);
+      sb.append(levelOne).append("(none)").append(newline);
     } else {
       for (String dg : dgListView.getItems()) {
-        sb.append("  ").append(dg).append(newline);
+        sb.append(levelOne).append(dg).append(newline);
       }
     }
-    sb.append("  DG3 readable: ").append(dg3ReadableValue.getText()).append(newline);
-    sb.append("  DG4 readable: ").append(dg4ReadableValue.getText()).append(newline).append(newline);
+    sb.append(levelOne).append("DG3 readable: ").append(dg3ReadableValue.getText()).append(newline);
+    sb.append(levelOne).append("DG4 readable: ").append(dg4ReadableValue.getText()).append(newline).append(newline);
 
-    sb.append("Technical Log").append(newline);
+    sb.append(baseIndent).append("Technical Log").append(newline);
     if (logEntries.isEmpty()) {
-      sb.append("  (no entries)").append(newline);
+      sb.append(levelOne).append("(no entries)").append(newline);
     } else {
       for (LogEntry entry : logEntries) {
-        sb.append("  ").append(formatLogEntry(entry)).append(newline);
+        sb.append(levelOne).append(formatLogEntry(entry)).append(newline);
       }
     }
     sb.append(newline);
 
-    sb.append("Security Explained").append(newline);
+    sb.append(baseIndent).append("Security Explained").append(newline);
     String securityText = securityContent.getText();
     if (securityText == null || securityText.isBlank()) {
-      sb.append("  (no details available)").append(newline);
+      sb.append(levelOne).append("(no details available)").append(newline);
     } else {
       for (String line : securityText.split("\r?\n")) {
-        sb.append("  ").append(line).append(newline);
+        sb.append(levelOne).append(line).append(newline);
       }
     }
 
-    ClipboardContent content = new ClipboardContent();
-    content.putString(sb.toString());
-    Clipboard.getSystemClipboard().setContent(content);
-    statusLabel.setText("Session info copied to clipboard");
+    return sb.toString();
   }
 
   private Path buildReportPath(String scenarioName) {
@@ -638,6 +853,19 @@ public final class EmuSimulatorApp extends Application {
 
   private static String orDefault(String value) {
     return (value == null || value.isBlank()) ? "—" : value;
+  }
+
+  private static final class BatchRunState {
+    final List<ScenarioPreset> presets;
+    final AdvancedOptionsSnapshot options;
+    final List<String> summaries = new ArrayList<>();
+    int index;
+
+    BatchRunState(List<ScenarioPreset> presets, AdvancedOptionsSnapshot options) {
+      this.presets = List.copyOf(presets);
+      this.options = options;
+      this.index = 0;
+    }
   }
 
   private final class UiScenarioListener implements ScenarioExecutionListener {
