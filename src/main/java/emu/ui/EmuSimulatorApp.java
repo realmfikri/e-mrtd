@@ -62,6 +62,7 @@ public final class EmuSimulatorApp extends Application {
   private final ToggleGroup logFilterGroup = new ToggleGroup();
   private final Label statusLabel = new Label("Ready");
   private final Button copyCliButton = new Button("Copy CLI");
+  private final Button copySessionInfoButton = new Button("Copy session info");
   private final Button exportButton = new Button("Export session");
   private final Label scenarioDescription = new Label("Select a scenario to see details.");
 
@@ -74,6 +75,7 @@ public final class EmuSimulatorApp extends Application {
   private final Label dg3ReadableValue = valueLabel();
   private final Label dg4ReadableValue = valueLabel();
   private final EnumMap<SimPhase, Label> phaseLabels = new EnumMap<>(SimPhase.class);
+  private final Label securityContent = new Label("Security explanations will surface here in a future milestone.");
   private final List<SimPhase> phaseOrder = List.of(
       SimPhase.CONNECTING,
       SimPhase.AUTHENTICATING,
@@ -248,10 +250,9 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private Tab buildSecurityTab() {
-    Label placeholder = new Label("Security explanations will surface here in a future milestone.");
-    placeholder.setWrapText(true);
-    placeholder.setPadding(new Insets(16));
-    Tab tab = new Tab("Security Explained", placeholder);
+    securityContent.setWrapText(true);
+    securityContent.setPadding(new Insets(16));
+    Tab tab = new Tab("Security Explained", securityContent);
     tab.setClosable(false);
     return tab;
   }
@@ -266,10 +267,12 @@ public final class EmuSimulatorApp extends Application {
 
     copyCliButton.setDisable(true);
     copyCliButton.setOnAction(e -> copyLastCommands());
+    copySessionInfoButton.setDisable(true);
+    copySessionInfoButton.setOnAction(e -> copySessionInfo());
     exportButton.setDisable(true);
     exportButton.setOnAction(e -> exportSession());
 
-    bar.getChildren().addAll(statusLabel, copyCliButton, exportButton);
+    bar.getChildren().addAll(statusLabel, copyCliButton, copySessionInfoButton, exportButton);
     return bar;
   }
 
@@ -290,6 +293,7 @@ public final class EmuSimulatorApp extends Application {
     lastReport = null;
     lastReportPath = null;
     copyCliButton.setDisable(true);
+    copySessionInfoButton.setDisable(true);
     exportButton.setDisable(true);
     statusLabel.setText("Running " + preset.getName() + "...");
 
@@ -320,6 +324,7 @@ public final class EmuSimulatorApp extends Application {
       failureMsg += " (exit code " + result.getExitCode() + ")";
       statusLabel.setText(failureMsg);
       exportButton.setDisable(true);
+      copySessionInfoButton.setDisable(false);
       return;
     }
 
@@ -337,6 +342,7 @@ public final class EmuSimulatorApp extends Application {
       }
       lastReport = report;
       exportButton.setDisable(false);
+      copySessionInfoButton.setDisable(false);
     } else {
       try {
         SessionReportViewData viewData = SessionReportParser.parse(result.getReportPath());
@@ -344,14 +350,17 @@ public final class EmuSimulatorApp extends Application {
           updateSummary(viewData);
           updateDataGroups(viewData);
           exportButton.setDisable(false);
+          copySessionInfoButton.setDisable(false);
         } else {
           statusLabel.setText("Completed (no report found)");
           exportButton.setDisable(true);
+          copySessionInfoButton.setDisable(false);
         }
       } catch (Exception ex) {
         statusLabel.setText("Completed (report parse error)");
         addLogEntry(SimLogCategory.GENERAL, "UI", "Failed to parse report: " + ex.getMessage());
         exportButton.setDisable(true);
+        copySessionInfoButton.setDisable(false);
       }
     }
   }
@@ -362,6 +371,7 @@ public final class EmuSimulatorApp extends Application {
     exportButton.setDisable(true);
     statusLabel.setText("Error running " + scenarioName + "); see log.");
     addLogEntry(SimLogCategory.GENERAL, "UI", throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
+    copySessionInfoButton.setDisable(false);
   }
 
   private Callback<ListView<LogEntry>, ListCell<LogEntry>> createLogCellFactory() {
@@ -481,6 +491,53 @@ public final class EmuSimulatorApp extends Application {
     content.putString(String.join(System.lineSeparator(), lastCommands));
     Clipboard.getSystemClipboard().setContent(content);
     statusLabel.setText("CLI copied to clipboard");
+  }
+
+  private void copySessionInfo() {
+    String newline = System.lineSeparator();
+    StringBuilder sb = new StringBuilder();
+
+    sb.append("Summary").append(newline);
+    sb.append("  Passive Auth verdict: ").append(verdictValue.getText()).append(newline);
+    sb.append("  Secure messaging: ").append(smModeValue.getText()).append(newline);
+    sb.append("  PACE: ").append(paceValue.getText()).append(newline);
+    sb.append("  Chip Authentication: ").append(caValue.getText()).append(newline).append(newline);
+
+    sb.append("Data Groups").append(newline);
+    if (dgListView.getItems().isEmpty()) {
+      sb.append("  (none)").append(newline);
+    } else {
+      for (String dg : dgListView.getItems()) {
+        sb.append("  ").append(dg).append(newline);
+      }
+    }
+    sb.append("  DG3 readable: ").append(dg3ReadableValue.getText()).append(newline);
+    sb.append("  DG4 readable: ").append(dg4ReadableValue.getText()).append(newline).append(newline);
+
+    sb.append("Technical Log").append(newline);
+    if (logEntries.isEmpty()) {
+      sb.append("  (no entries)").append(newline);
+    } else {
+      for (LogEntry entry : logEntries) {
+        sb.append("  ").append(formatLogEntry(entry)).append(newline);
+      }
+    }
+    sb.append(newline);
+
+    sb.append("Security Explained").append(newline);
+    String securityText = securityContent.getText();
+    if (securityText == null || securityText.isBlank()) {
+      sb.append("  (no details available)").append(newline);
+    } else {
+      for (String line : securityText.split("\r?\n")) {
+        sb.append("  ").append(line).append(newline);
+      }
+    }
+
+    ClipboardContent content = new ClipboardContent();
+    content.putString(sb.toString());
+    Clipboard.getSystemClipboard().setContent(content);
+    statusLabel.setText("Session info copied to clipboard");
   }
 
   private Path buildReportPath(String scenarioName) {
