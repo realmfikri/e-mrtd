@@ -1,5 +1,7 @@
 package emu.ui;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -90,6 +92,38 @@ final class ScenarioPresets {
             "Demonstrates JSON report generation (UI always captures the file).",
             readStep("Run ReadDG1Main", "--seed"))
     );
+  }
+
+  static ScenarioPreset icaoDoc9303() {
+    Path outputDir = Paths.get("target", "icao-doc9303");
+    Path cvcaPath = outputDir.resolve("cvca.cvc");
+    Path terminalPath = outputDir.resolve("terminal.cvc");
+    Path terminalKeyPath = outputDir.resolve("terminal.key");
+
+    List<ScenarioStep> steps = new ArrayList<>();
+    List<String> generatorArgs = new ArrayList<>();
+    generatorArgs.add("--out-dir=" + outputDir);
+    generatorArgs.add("--rights=DG3_DG4");
+    steps.add(new ScenarioStep("Generate demo TA chain", GENERATE_TA, generatorArgs, false));
+
+    List<String> readArgs = new ArrayList<>();
+    readArgs.add("--seed");
+    readArgs.add("--attempt-pace");
+    readArgs.add("--require-pa");
+    readArgs.add("--require-aa");
+    readArgs.add("--ta-cvc=" + cvcaPath);
+    readArgs.add("--ta-cvc=" + terminalPath);
+    readArgs.add("--ta-key=" + terminalKeyPath);
+    steps.add(new ScenarioStep(
+        "Run ICAO Doc 9303 end-to-end",
+        READ_MAIN,
+        readArgs,
+        true));
+
+    return new ScenarioPreset(
+        "ICAO Doc 9303 end-to-end",
+        "Runs the full ICAO Doc 9303 Part 11 flow: personalization, PACE secure messaging, Passive, Chip, Active, and Terminal Authentication, then reads LDS data groups.",
+        List.copyOf(steps));
   }
 
   private static ScenarioPreset scenario(String name, String description, List<ScenarioStep> steps) {
