@@ -9,6 +9,10 @@ final class SessionReportViewData {
   private final boolean paceAttempted;
   private final boolean paceEstablished;
   private final boolean caEstablished;
+  private final boolean activeAuthEnabled;
+  private final boolean activeAuthSupported;
+  private final boolean activeAuthVerified;
+  private final String activeAuthAlgorithm;
   private final String passiveAuthVerdict;
   private final String passiveAuthAlgorithm;
   private final List<Integer> presentDataGroups;
@@ -21,6 +25,10 @@ final class SessionReportViewData {
       boolean paceAttempted,
       boolean paceEstablished,
       boolean caEstablished,
+      boolean activeAuthEnabled,
+      boolean activeAuthSupported,
+      boolean activeAuthVerified,
+      String activeAuthAlgorithm,
       String passiveAuthVerdict,
       String passiveAuthAlgorithm,
       List<Integer> presentDataGroups,
@@ -31,6 +39,10 @@ final class SessionReportViewData {
     this.paceAttempted = paceAttempted;
     this.paceEstablished = paceEstablished;
     this.caEstablished = caEstablished;
+    this.activeAuthEnabled = activeAuthEnabled;
+    this.activeAuthSupported = activeAuthSupported;
+    this.activeAuthVerified = activeAuthVerified;
+    this.activeAuthAlgorithm = activeAuthAlgorithm;
     this.passiveAuthVerdict = passiveAuthVerdict;
     this.passiveAuthAlgorithm = passiveAuthAlgorithm;
     this.presentDataGroups = List.copyOf(presentDataGroups);
@@ -56,6 +68,22 @@ final class SessionReportViewData {
 
   boolean isCaEstablished() {
     return caEstablished;
+  }
+
+  boolean isActiveAuthEnabled() {
+    return activeAuthEnabled;
+  }
+
+  boolean isActiveAuthSupported() {
+    return activeAuthSupported;
+  }
+
+  boolean isActiveAuthVerified() {
+    return activeAuthVerified;
+  }
+
+  String getActiveAuthAlgorithm() {
+    return activeAuthAlgorithm;
   }
 
   String getPassiveAuthVerdict() {

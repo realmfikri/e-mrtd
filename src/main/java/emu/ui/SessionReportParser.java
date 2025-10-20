@@ -36,6 +36,10 @@ final class SessionReportParser {
         raw.session.paceAttempted,
         raw.session.paceEstablished,
         raw.session.caEstablished,
+        raw.aa != null && raw.aa.enabled,
+        raw.aa != null && raw.aa.supported,
+        raw.aa != null && raw.aa.verified,
+        raw.aa != null ? raw.aa.algorithm : null,
         raw.pa != null ? raw.pa.verdict : null,
         raw.pa != null ? raw.pa.algorithm : null,
         present,
@@ -55,6 +59,10 @@ final class SessionReportParser {
         report.session.paceAttempted,
         report.session.paceEstablished,
         report.session.caEstablished,
+        report.activeAuth != null && report.activeAuth.enabled,
+        report.activeAuth != null && report.activeAuth.supported,
+        report.activeAuth != null && report.activeAuth.verified,
+        report.activeAuth != null ? report.activeAuth.algorithm : null,
         report.passiveAuth != null ? report.passiveAuth.verdict : null,
         report.passiveAuth != null ? report.passiveAuth.algorithm : null,
         present,
@@ -66,6 +74,7 @@ final class SessionReportParser {
   private static final class RawSessionReport {
     RawSession session;
     RawPassiveAuth pa;
+    RawActiveAuth aa;
     RawDataGroups dg;
   }
 
@@ -76,6 +85,14 @@ final class SessionReportParser {
     boolean paceAttempted;
     boolean paceEstablished;
     boolean caEstablished;
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  private static final class RawActiveAuth {
+    boolean enabled;
+    boolean supported;
+    boolean verified;
+    String algorithm;
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

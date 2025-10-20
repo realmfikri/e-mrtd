@@ -89,6 +89,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import emu.PersonalizationSupport.SODArtifacts;
+import emu.SimLogCategory;
 
 public final class SimRunner {
   private static final byte[] MRTD_AID = new byte[]{(byte)0xA0,0x00,0x00,0x02,0x47,0x10,0x01};
@@ -115,6 +116,7 @@ public final class SimRunner {
 
   private static final int AA_CHALLENGE_LENGTH = 8;
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+  private static final ThreadLocal<SimLogCategory> NEXT_STDOUT_CATEGORY = new ThreadLocal<>();
 
   public SessionReport run(SimConfig config, SimEvents events) throws Exception {
     Objects.requireNonNull(config, "config");
@@ -250,13 +252,13 @@ public final class SimRunner {
     if (paceOutcome.attempted) {
       logPaceOutcome(paceOutcome);
     } else {
-      System.out.println("PACE not attempted (--attempt-pace not specified).");
+      securityPrintln("PACE not attempted (--attempt-pace not specified).");
     }
 
     if (!paceOutcome.established) {
-      System.out.println("Falling back to BAC secure messaging.");
+      securityPrintln("Falling back to BAC secure messaging.");
       svc.doBAC(bacKey);
-      logSecureMessagingTransition(sink, "BAC fallback", "BAC", "3DES");
+      logSecureMessagingTransition("BAC fallback", "BAC", "3DES");
     }
 
     System.out.printf("paceAttempted=%s, paceEstablished=%s%n", paceOutcome.attempted, paceOutcome.established);
@@ -270,7 +272,7 @@ public final class SimRunner {
     if (dg14 != null) {
       report.dataGroups.addPresent(14);
     }
-    ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(svc, dg14, sink);
+    ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(svc, dg14);
     report.session.caEstablished = chipAuthOutcome.established;
     System.out.printf("caEstablished=%s%n", chipAuthOutcome.established);
 
@@ -302,13 +304,13 @@ public final class SimRunner {
         terminalAuthOutcome.dg3Readable,
         terminalAuthOutcome.dg4Readable);
     if (terminalAuthOutcome.failure != null) {
-      System.out.println("Terminal Authentication failure: " + terminalAuthOutcome.failure.getMessage());
+      securityPrintln("Terminal Authentication failure: " + terminalAuthOutcome.failure.getMessage());
     }
     if (terminalAuthOutcome.terminalRights != null) {
-      System.out.printf("taRights=%s (DG3 allowed=%s, DG4 allowed=%s)%n",
+      securityPrintln(String.format("taRights=%s (DG3 allowed=%s, DG4 allowed=%s)",
           terminalAuthOutcome.terminalRights.name(),
           terminalAuthOutcome.dg3AllowedByRights,
-          terminalAuthOutcome.dg4AllowedByRights);
+          terminalAuthOutcome.dg4AllowedByRights));
     }
     report.dataGroups.setDg3Readable(terminalAuthOutcome.dg3Readable);
     report.dataGroups.setDg4Readable(terminalAuthOutcome.dg4Readable);
@@ -697,7 +699,6 @@ public final class SimRunner {
       outcome.established = result != null && result.getWrapper() != null;
       if (outcome.established) {
         logSecureMessagingTransition(
-            events,
             "PACE handshake",
             "PACE",
             describeCipher(result.getCipherAlg(), result.getKeyLength()));
@@ -709,48 +710,48 @@ public final class SimRunner {
   }
 
   private static void logPaceOutcome(PaceOutcome outcome) {
-    System.out.printf("PACE entries advertised: %d%n", outcome.availableOptions);
+    securityPrintln(String.format("PACE entries advertised: %d", outcome.availableOptions));
     if (outcome.keySelection != null && outcome.keySelection.label != null) {
-      System.out.printf("PACE key source: %s%n", outcome.keySelection.label);
+      securityPrintln(String.format("PACE key source: %s", outcome.keySelection.label));
     }
     if (outcome.keySelection != null && outcome.keySelection.error != null) {
-      System.out.println("PACE key preparation failed: " + outcome.keySelection.error.getMessage());
+      securityPrintln("PACE key preparation failed: " + outcome.keySelection.error.getMessage());
     }
     if (hasText(outcome.preference)) {
-      System.out.printf("PACE preference: %s (matched=%s)%n",
+      securityPrintln(String.format("PACE preference: %s (matched=%s)",
           outcome.preference,
-          outcome.preferenceMatched);
+          outcome.preferenceMatched));
     }
     if (outcome.selectedInfo != null) {
       BigInteger parameterId = outcome.selectedInfo.getParameterId();
       String displayOid = outcome.selectedInfo.getProtocolOIDString();
       String dottedOid = outcome.selectedInfo.getObjectIdentifier();
-      System.out.printf("Selected PACE OID=%s version=%d paramId=%s keyLength=%d%n",
+      securityPrintln(String.format("Selected PACE OID=%s version=%d paramId=%s keyLength=%d",
           displayOid != null ? displayOid : dottedOid,
           outcome.selectedInfo.getVersion(),
           parameterId != null ? parameterId.toString(16) : "default",
-          resolvePaceKeyLength(outcome.selectedInfo));
+          resolvePaceKeyLength(outcome.selectedInfo)));
       if (displayOid != null && dottedOid != null && !displayOid.equals(dottedOid)) {
-        System.out.printf("  (OID dotted=%s)%n", dottedOid);
+        securityPrintln(String.format("  (OID dotted=%s)", dottedOid));
       }
     }
     if (outcome.result != null) {
-      System.out.printf("PACE mapping=%s agreement=%s cipher=%s digest=%s keyLength=%d%n",
+      securityPrintln(String.format("PACE mapping=%s agreement=%s cipher=%s digest=%s keyLength=%d",
           outcome.result.getMappingType(),
           outcome.result.getAgreementAlg(),
           outcome.result.getCipherAlg(),
           outcome.result.getDigestAlg(),
-          outcome.result.getKeyLength());
+          outcome.result.getKeyLength()));
     }
     if (outcome.availableOptions == 0) {
-      System.out.println("PACE info not present in EF.CardAccess.");
+      securityPrintln("PACE info not present in EF.CardAccess.");
     }
     if (outcome.established) {
-      System.out.println("PACE secure messaging established.");
+      securityPrintln("PACE secure messaging established.");
     } else if (outcome.failure != null) {
-      System.out.println("PACE failed: " + outcome.failure.getMessage());
+      securityPrintln("PACE failed: " + outcome.failure.getMessage());
     } else if (outcome.attempted) {
-      System.out.println("PACE did not establish secure messaging.");
+      securityPrintln("PACE did not establish secure messaging.");
     }
   }
 
@@ -883,33 +884,32 @@ public final class SimRunner {
 
   private static ChipAuthOutcome performChipAuthenticationIfSupported(
       PassportService svc,
-      DG14File dg14,
-      SimEvents events) {
+      DG14File dg14) {
     ChipAuthOutcome outcome = new ChipAuthOutcome();
     if (dg14 == null) {
-      System.out.println("Chip Authentication info unavailable (DG14 missing).");
+      securityPrintln("Chip Authentication info unavailable (DG14 missing).");
       return outcome;
     }
     List<ChipAuthenticationInfo> chipInfos = dg14.getChipAuthenticationInfos();
     List<ChipAuthenticationPublicKeyInfo> publicKeyInfos = dg14.getChipAuthenticationPublicKeyInfos();
     outcome.advertised = chipInfos != null && !chipInfos.isEmpty();
     if (!outcome.advertised) {
-      System.out.println("Chip Authentication not advertised in DG14.");
+      securityPrintln("Chip Authentication not advertised in DG14.");
       return outcome;
     }
 
-    System.out.printf("Chip Authentication entries advertised: %d%n", chipInfos.size());
+    securityPrintln(String.format("Chip Authentication entries advertised: %d", chipInfos.size()));
     for (ChipAuthenticationInfo info : chipInfos) {
       BigInteger keyId = info.getKeyId();
       String caDisplay = info.getProtocolOIDString();
       String caDotted = info.getObjectIdentifier();
-      System.out.printf("  CA OID=%s version=%d keyId=%s keyLength=%d%n",
+      securityPrintln(String.format("  CA OID=%s version=%d keyId=%s keyLength=%d",
           caDisplay != null ? caDisplay : caDotted,
           info.getVersion(),
           keyId != null ? keyId.toString(16) : "n/a",
-          resolveChipKeyLength(info));
+          resolveChipKeyLength(info)));
       if (caDisplay != null && caDotted != null && !caDisplay.equals(caDotted)) {
-        System.out.printf("    (OID dotted=%s)%n", caDotted);
+        securityPrintln(String.format("    (OID dotted=%s)", caDotted));
       }
     }
 
@@ -929,7 +929,7 @@ public final class SimRunner {
 
     outcome.selectedInfo = selectPreferredChipAuth(chipInfos);
     if (outcome.selectedInfo == null) {
-      System.out.println("Unable to select Chip Authentication profile.");
+      securityPrintln("Unable to select Chip Authentication profile.");
       return outcome;
     }
 
@@ -940,7 +940,7 @@ public final class SimRunner {
     }
 
     if (publicKeyInfo == null) {
-      System.out.println("Chip Authentication public key not found; skipping CA handshake.");
+      securityPrintln("Chip Authentication public key not found; skipping CA handshake.");
       return outcome;
     }
 
@@ -953,19 +953,21 @@ public final class SimRunner {
       outcome.result = result;
       outcome.established = result != null && result.getWrapper() != null;
       if (outcome.established) {
-        System.out.printf("Chip Authentication established (agreement=%s cipher=%s keyId=%s).%n",
-            agreementAlg, cipherAlg, keyId != null ? keyId.toString(16) : "n/a");
+        securityPrintln(String.format(
+            "Chip Authentication established (agreement=%s cipher=%s keyId=%s).",
+            agreementAlg,
+            cipherAlg,
+            keyId != null ? keyId.toString(16) : "n/a"));
         logSecureMessagingTransition(
-            events,
             "Chip Authentication",
             resolveSecureMessagingMode(null, outcome),
             describeChipCipher(outcome.selectedInfo));
       } else {
-        System.out.println("Chip Authentication handshake did not upgrade secure messaging.");
+        securityPrintln("Chip Authentication handshake did not upgrade secure messaging.");
       }
     } catch (Exception e) {
       outcome.failure = e;
-      System.out.println("Chip Authentication failed: " + e.getMessage());
+      securityPrintln("Chip Authentication failed: " + e.getMessage());
     }
     return outcome;
   }
@@ -977,13 +979,13 @@ public final class SimRunner {
       boolean requireAA) {
     ActiveAuthOutcome outcome = new ActiveAuthOutcome();
     if (dg15 == null) {
-      System.out.println("Active Authentication skipped: DG15 not present.");
+      securityPrintln("Active Authentication skipped: DG15 not present.");
       return outcome;
     }
     outcome.available = true;
     outcome.publicKey = dg15.getPublicKey();
     if (outcome.publicKey == null) {
-      System.out.println("Active Authentication skipped: DG15 does not contain a public key.");
+      securityPrintln("Active Authentication skipped: DG15 does not contain a public key.");
       return outcome;
     }
 
@@ -999,7 +1001,7 @@ public final class SimRunner {
       if (result != null) {
         outcome.response = result.getResponse();
         if (shouldRetryPlainActiveAuth(outcome.response, expectedResponseLength)) {
-          System.out.println(
+          securityPrintln(
               "Active Authentication response missing under secure messaging, retrying without protection.");
           outcome.response = tryPlainInternalAuthenticate(rawService, challenge);
         }
@@ -1007,27 +1009,27 @@ public final class SimRunner {
           outcome.verified = verifyActiveAuthenticationSignature(outcome.publicKey, challenge, outcome.response);
         } catch (GeneralSecurityException e) {
           outcome.failure = e;
-          System.out.println("Active Authentication verification error: " + e.getMessage());
+          securityPrintln("Active Authentication verification error: " + e.getMessage());
         }
       }
 
       if (outcome.verified) {
         Integer keyBits = describeKeyBits(outcome.publicKey);
         if (keyBits != null) {
-          System.out.printf("Active Authentication verified (%s %d-bit).%n",
-              outcome.publicKey.getAlgorithm(), keyBits);
+          securityPrintln(String.format("Active Authentication verified (%s %d-bit).",
+              outcome.publicKey.getAlgorithm(), keyBits));
         } else {
-          System.out.printf("Active Authentication verified (%s).%n",
-              outcome.publicKey.getAlgorithm());
+          securityPrintln(String.format("Active Authentication verified (%s).",
+              outcome.publicKey.getAlgorithm()));
         }
       } else if (requireAA) {
-        System.out.println("Active Authentication verification failed.");
+        securityPrintln("Active Authentication verification failed.");
       } else {
-        System.out.println("Active Authentication attempt did not verify signature.");
+        securityPrintln("Active Authentication attempt did not verify signature.");
       }
     } catch (Exception e) {
       outcome.failure = e;
-      System.out.println("Active Authentication failed: " + e.getMessage());
+      securityPrintln("Active Authentication failed: " + e.getMessage());
     } finally {
       Arrays.fill(challenge, (byte) 0x00);
     }
@@ -1307,29 +1309,31 @@ public final class SimRunner {
     outcome.suppliedCertificates = cvcBundles != null ? cvcBundles.size() : 0;
 
     if (cvcBundles == null || cvcBundles.isEmpty()) {
-      System.out.println("Terminal Authentication skipped: provide at least one --ta-cvc file.");
+      securityPrintln("Terminal Authentication skipped: provide at least one --ta-cvc file.");
       return outcome;
     }
     if (chipOutcome == null || chipOutcome.result == null) {
-      System.out.println("Terminal Authentication skipped: Chip Authentication was not established.");
+      securityPrintln("Terminal Authentication skipped: Chip Authentication was not established.");
       return outcome;
     }
     if (taKeyPath == null) {
-      System.out.println("Terminal Authentication skipped: --ta-key not provided.");
+      securityPrintln("Terminal Authentication skipped: --ta-key not provided.");
       return outcome;
     }
 
     List<CardVerifiableCertificate> certificateChain = new ArrayList<>();
     for (CvcBundle bundle : cvcBundles) {
       if (bundle.error != null) {
-        System.out.printf("  %s → cannot use certificate: %s%n",
+        securityPrintln(String.format("  %s → cannot use certificate: %s",
             bundle.path,
-            bundle.error.getMessage() != null ? bundle.error.getMessage() : "unknown error");
+            bundle.error.getMessage() != null ? bundle.error.getMessage() : "unknown error"));
         outcome.failure = bundle.error;
         return outcome;
       }
       if (bundle.cardCertificate == null) {
-        System.out.printf("  %s → parsed certificate but could not build CardVerifiableCertificate.%n", bundle.path);
+        securityPrintln(String.format(
+            "  %s → parsed certificate but could not build CardVerifiableCertificate.",
+            bundle.path));
         outcome.failure = new IllegalStateException("Unable to build CVC certificate wrapper");
         return outcome;
       }
@@ -1350,7 +1354,7 @@ public final class SimRunner {
     try {
       terminalKey = loadPrivateKey(taKeyPath);
     } catch (Exception e) {
-      System.out.println("Terminal Authentication skipped: unable to load terminal private key (" + e.getMessage() + ").");
+      securityPrintln("Terminal Authentication skipped: unable to load terminal private key (" + e.getMessage() + ").");
       outcome.failure = e;
       return outcome;
     }
@@ -1362,35 +1366,35 @@ public final class SimRunner {
       if (paceResult != null) {
         taResult = svc.doEACTA(null, certificateChain, terminalKey, null, chipOutcome.result, paceResult);
       } else {
-        taResult = svc.doEACTA(null, certificateChain, terminalKey, null, chipOutcome.result, documentNumber);
-      }
-      outcome.succeeded = taResult != null;
-      if (outcome.succeeded) {
-        System.out.println("Terminal Authentication handshake completed.");
-      } else {
-        System.out.println("Terminal Authentication did not return a success indicator.");
-      }
-    } catch (Exception e) {
-      outcome.failure = e;
-      System.out.println("Terminal Authentication failed: " + e.getMessage());
+      taResult = svc.doEACTA(null, certificateChain, terminalKey, null, chipOutcome.result, documentNumber);
     }
+    outcome.succeeded = taResult != null;
+    if (outcome.succeeded) {
+      securityPrintln("Terminal Authentication handshake completed.");
+    } else {
+      securityPrintln("Terminal Authentication did not return a success indicator.");
+    }
+  } catch (Exception e) {
+    outcome.failure = e;
+    securityPrintln("Terminal Authentication failed: " + e.getMessage());
+  }
 
-    outcome.dg3Readable = attemptDataGroupRead(svc, PassportService.EF_DG3, "DG3");
-    outcome.dg4Readable = attemptDataGroupRead(svc, PassportService.EF_DG4, "DG4");
-    if (outcome.terminalRights != null) {
-      if (outcome.dg3AllowedByRights && !outcome.dg3Readable) {
-        System.out.println("DG3 read denied despite terminal rights including DG3 access.");
-      }
-      if (!outcome.dg3AllowedByRights && outcome.dg3Readable) {
-        System.out.println("DG3 read succeeded even though terminal rights do not include DG3.");
-      }
-      if (outcome.dg4AllowedByRights && !outcome.dg4Readable) {
-        System.out.println("DG4 read denied despite terminal rights including DG4 access.");
-      }
-      if (!outcome.dg4AllowedByRights && outcome.dg4Readable) {
-        System.out.println("DG4 read succeeded even though terminal rights do not include DG4.");
-      }
+  outcome.dg3Readable = attemptDataGroupRead(svc, PassportService.EF_DG3, "DG3");
+  outcome.dg4Readable = attemptDataGroupRead(svc, PassportService.EF_DG4, "DG4");
+  if (outcome.terminalRights != null) {
+    if (outcome.dg3AllowedByRights && !outcome.dg3Readable) {
+      securityPrintln("DG3 read denied despite terminal rights including DG3 access.");
     }
+    if (!outcome.dg3AllowedByRights && outcome.dg3Readable) {
+      securityPrintln("DG3 read succeeded even though terminal rights do not include DG3.");
+    }
+    if (outcome.dg4AllowedByRights && !outcome.dg4Readable) {
+      securityPrintln("DG4 read denied despite terminal rights including DG4 access.");
+    }
+    if (!outcome.dg4AllowedByRights && outcome.dg4Readable) {
+      securityPrintln("DG4 read succeeded even though terminal rights do not include DG4.");
+    }
+  }
     return outcome;
   }
 
@@ -1452,36 +1456,36 @@ public final class SimRunner {
 
   private static void reportTerminalAuthentication(DG14File dg14, List<CvcBundle> cvcBundles) {
     if (dg14 == null) {
-      System.out.println("Terminal Authentication info unavailable (DG14 missing).");
+      securityPrintln("Terminal Authentication info unavailable (DG14 missing).");
     } else {
       List<TerminalAuthenticationInfo> taInfos = dg14.getTerminalAuthenticationInfos();
       if (taInfos == null || taInfos.isEmpty()) {
-        System.out.println("Terminal Authentication not advertised in DG14.");
+        securityPrintln("Terminal Authentication not advertised in DG14.");
       } else {
-        System.out.println("Terminal Authentication advertised entries:");
+        securityPrintln("Terminal Authentication advertised entries:");
         for (TerminalAuthenticationInfo info : taInfos) {
           int fileId = info.getFileId();
           byte sfi = info.getShortFileId();
-          System.out.printf("  TA OID=%s version=%d fileId=%04X (SFI=%02X)%n",
+          securityPrintln(String.format("  TA OID=%s version=%d fileId=%04X (SFI=%02X)",
               info.getProtocolOIDString(),
               info.getVersion(),
               fileId,
-              sfi & 0xFF);
+              sfi & 0xFF));
         }
       }
     }
 
     if (cvcBundles == null || cvcBundles.isEmpty()) {
-      System.out.println("No terminal authentication CVCs supplied.");
+      securityPrintln("No terminal authentication CVCs supplied.");
       return;
     }
 
-    System.out.printf("Terminal Authentication CVCs processed: %d%n", cvcBundles.size());
+    securityPrintln(String.format("Terminal Authentication CVCs processed: %d", cvcBundles.size()));
     for (CvcBundle bundle : cvcBundles) {
       if (bundle.certificate == null) {
-        System.out.printf("  %s → parse failed: %s%n",
+        securityPrintln(String.format("  %s → parse failed: %s",
             bundle.path,
-            bundle.error != null ? bundle.error.getMessage() : "unknown error");
+            bundle.error != null ? bundle.error.getMessage() : "unknown error"));
         continue;
       }
       describeCvc(bundle);
@@ -1526,16 +1530,16 @@ public final class SimRunner {
       AuthorizationRoleEnum role = authorizationField != null ? authorizationField.getRole() : null;
       AccessRightEnum rights = authorizationField != null ? authorizationField.getAccessRight() : null;
 
-      System.out.printf("  %s → holder=%s issuer=%s role=%s rights=%s valid=%s..%s%n",
+      securityPrintln(String.format("  %s → holder=%s issuer=%s role=%s rights=%s valid=%s..%s",
           bundle.path,
           holder != null ? holder.getConcatenated() : "-",
           authority != null ? authority.getConcatenated() : "-",
           role != null ? role.name() : "-",
           rights != null ? rights.name() : "-",
           formatDate(validFrom),
-          formatDate(validTo));
+          formatDate(validTo)));
     } catch (Exception e) {
-      System.out.printf("  %s → unable to summarise: %s%n", bundle.path, e.getMessage());
+      securityPrintln(String.format("  %s → unable to summarise: %s", bundle.path, e.getMessage()));
     }
   }
 
@@ -1835,7 +1839,11 @@ public final class SimRunner {
       }
       String message = buffer.toString();
       buffer.setLength(0);
-      events.onLog(SimLogCategory.GENERAL, message);
+      SimLogCategory category = consumeStdoutCategory();
+      if (category == null) {
+        category = SimLogCategory.GENERAL;
+      }
+      events.onLog(category, message);
     }
 
     void finish() {
@@ -2012,8 +2020,25 @@ public final class SimRunner {
     return "type=" + imageDataType;
   }
 
+  private static void securityPrintln(String message) {
+    printlnWithCategory(SimLogCategory.SECURITY, message);
+  }
+
+  private static void printlnWithCategory(SimLogCategory category, String message) {
+    if (message == null) {
+      return;
+    }
+    NEXT_STDOUT_CATEGORY.set(category);
+    System.out.println(message);
+  }
+
+  private static SimLogCategory consumeStdoutCategory() {
+    SimLogCategory category = NEXT_STDOUT_CATEGORY.get();
+    NEXT_STDOUT_CATEGORY.remove();
+    return category;
+  }
+
   private static void logSecureMessagingTransition(
-      SimEvents events,
       String stage,
       String mode,
       String detail) {
@@ -2029,8 +2054,7 @@ public final class SimRunner {
       message.append(" after ").append(stage);
     }
     message.append('.');
-    System.out.println(message);
-    events.onLog(SimLogCategory.SECURITY, message.toString());
+    securityPrintln(message.toString());
   }
 
   private static String describeCipher(String cipherAlg, int keyLength) {
