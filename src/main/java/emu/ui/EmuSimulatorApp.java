@@ -72,6 +72,7 @@ public final class EmuSimulatorApp extends Application {
   private final Label smModeValue = valueLabel();
   private final Label paceValue = valueLabel();
   private final Label caValue = valueLabel();
+  private final Label aaValue = valueLabel();
 
   private final ListView<String> dgListView = new ListView<>();
   private final Label dg3ReadableValue = valueLabel();
@@ -200,6 +201,7 @@ public final class EmuSimulatorApp extends Application {
     addSummaryRow(grid, 1, "Secure messaging", smModeValue);
     addSummaryRow(grid, 2, "PACE", paceValue);
     addSummaryRow(grid, 3, "Chip Authentication", caValue);
+    addSummaryRow(grid, 4, "Active Authentication", aaValue);
 
     Tab tab = new Tab("Summary", grid);
     tab.setClosable(false);
@@ -629,6 +631,7 @@ public final class EmuSimulatorApp extends Application {
     paceValue.setText(String.format("Attempted: %s | Established: %s",
         yesNo(data.isPaceAttempted()), yesNo(data.isPaceEstablished())));
     caValue.setText("Established: " + yesNo(data.isCaEstablished()));
+    aaValue.setText(buildActiveAuthSummary(data));
   }
 
   private void updateDataGroups(SessionReportViewData data) {
@@ -646,6 +649,7 @@ public final class EmuSimulatorApp extends Application {
     smModeValue.setText("—");
     paceValue.setText("—");
     caValue.setText("—");
+    aaValue.setText("—");
   }
 
   private void clearDataGroups() {
@@ -731,7 +735,8 @@ public final class EmuSimulatorApp extends Application {
     sb.append(levelOne).append("Passive Auth verdict: ").append(verdictValue.getText()).append(newline);
     sb.append(levelOne).append("Secure messaging: ").append(smModeValue.getText()).append(newline);
     sb.append(levelOne).append("PACE: ").append(paceValue.getText()).append(newline);
-    sb.append(levelOne).append("Chip Authentication: ").append(caValue.getText()).append(newline).append(newline);
+    sb.append(levelOne).append("Chip Authentication: ").append(caValue.getText()).append(newline);
+    sb.append(levelOne).append("Active Authentication: ").append(aaValue.getText()).append(newline).append(newline);
 
     sb.append(baseIndent).append("Data Groups").append(newline);
     if (dgListView.getItems().isEmpty()) {
@@ -765,6 +770,18 @@ public final class EmuSimulatorApp extends Application {
     }
 
     return sb.toString();
+  }
+
+  private String buildActiveAuthSummary(SessionReportViewData data) {
+    if (data == null) {
+      return "—";
+    }
+    return String.format(
+        "Enabled: %s | Supported: %s | Verified: %s | Algorithm: %s",
+        yesNo(data.isActiveAuthEnabled()),
+        yesNo(data.isActiveAuthSupported()),
+        yesNo(data.isActiveAuthVerified()),
+        orDefault(data.getActiveAuthAlgorithm()));
   }
 
   private Path buildReportPath(String scenarioName) {
