@@ -64,6 +64,7 @@ public final class EmuSimulatorApp extends Application {
   private final Button copyCliButton = new Button("Copy CLI");
   private final Button copySessionInfoButton = new Button("Copy session info");
   private final Button exportButton = new Button("Export session");
+  private final Button runDoc9303Button = new Button("Run ICAO Doc 9303 flow");
   private final Button runAllButton = new Button("Run all tests");
   private final Label scenarioDescription = new Label("Select a scenario to see details.");
 
@@ -136,6 +137,12 @@ public final class EmuSimulatorApp extends Application {
       scenarioButtonsBox.getChildren().add(button);
     }
 
+    ScenarioPreset icaoPreset = ScenarioPresets.icaoDoc9303();
+    runDoc9303Button.setMaxWidth(Double.MAX_VALUE);
+    runDoc9303Button.setWrapText(true);
+    runDoc9303Button.setTooltip(new Tooltip(icaoPreset.getDescription()));
+    runDoc9303Button.setOnAction(e -> runScenario(icaoPreset));
+
     runAllButton.setMaxWidth(Double.MAX_VALUE);
     runAllButton.setOnAction(e -> runAllScenarios());
 
@@ -146,7 +153,7 @@ public final class EmuSimulatorApp extends Application {
     scenarioDescription.setWrapText(true);
     scenarioDescription.setPadding(new Insets(8, 0, 0, 0));
 
-    container.getChildren().addAll(header, runAllButton, scrollPane, scenarioDescription, advancedOptionsPane);
+    container.getChildren().addAll(header, runDoc9303Button, runAllButton, scrollPane, scenarioDescription, advancedOptionsPane);
     VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
     return container;
@@ -318,6 +325,7 @@ public final class EmuSimulatorApp extends Application {
     copyCliButton.setDisable(true);
     copySessionInfoButton.setDisable(true);
     exportButton.setDisable(true);
+    runDoc9303Button.setDisable(true);
     runAllButton.setDisable(true);
     statusLabel.setText("Running " + preset.getName() + "...");
 
@@ -358,6 +366,7 @@ public final class EmuSimulatorApp extends Application {
     if (scenarioButtonsBox != null) {
       scenarioButtonsBox.setDisable(true);
     }
+    runDoc9303Button.setDisable(true);
     runAllButton.setDisable(true);
     statusLabel.setText("Running all tests...");
     runNextScenarioInBatch();
@@ -396,6 +405,7 @@ public final class EmuSimulatorApp extends Application {
       scenarioButtonsBox.setDisable(false);
     }
     runAllButton.setDisable(false);
+    runDoc9303Button.setDisable(false);
     if (summaryPath != null) {
       String message = clipboardSuccess
           ? "Completed all tests; summary copied to clipboard and saved to " + summaryPath
@@ -575,6 +585,7 @@ public final class EmuSimulatorApp extends Application {
 
     if (batchRunState == null) {
       runAllButton.setDisable(false);
+      runDoc9303Button.setDisable(false);
       if (scenarioButtonsBox != null) {
         scenarioButtonsBox.setDisable(false);
       }
