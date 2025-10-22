@@ -9,7 +9,6 @@ import javax.smartcardio.*;
 import org.jmrtd.PassportService;
 import org.jmrtd.lds.LDSFile;
 import org.jmrtd.lds.icao.COMFile;
-import org.jmrtd.lds.icao.DG1File;
 import net.sf.scuba.data.Gender;
 import org.jmrtd.lds.icao.MRZInfo;
 
@@ -58,24 +57,22 @@ public class PersoMain {
     apdu(ch, 0x00, 0xA4, 0x04, 0x0C, MRTD_AID, "SELECT AID");
 
     // 3) Siapkan payload LDS (COM + DG1) dengan JMRTD
-    // COM berisi daftar DG yang hadir. Di sini minimalis: hanya DG1.
-    int[] tagList = new int[]{
-        LDSFile.EF_DG1_TAG,
-        LDSFile.EF_DG2_TAG,
-        LDSFile.EF_DG3_TAG,
-        LDSFile.EF_DG4_TAG,
-        LDSFile.EF_DG14_TAG,
-        LDSFile.EF_DG15_TAG
-    };
-    COMFile com = new COMFile("1.7", "4.0.0", tagList); // versi umum; cukup untuk uji
-    byte[] comBytes = com.getEncoded();
-
     // DG1 dari MRZ dummy
     //  P<UTO BEAN<<HAPPY, no dok 123456789, WN UTO, Lahir 75-01-01, Exp 25-01-01, gender M
     MRZInfo mrz = new MRZInfo("P<", "UTO", "BEAN", "HAPPY",
             "123456789", "UTO", "750101", Gender.MALE, "250101", "");
-    DG1File dg1 = new DG1File(mrz);
-    byte[] dg1Bytes = dg1.getEncoded();
+    int faceWidth = largeDG2 ? 720 : 480;
+    int faceHeight = largeDG2 ? 960 : 600;
+    PersonalizationJob job = PersonalizationJob.builder()
+        .withMrzInfo(mrz)
+        .withFaceSyntheticSize(faceWidth, faceHeight)
+        .corruptDg2(corruptDG2)
+        .build();
+
+    int[] tagList = job.getComTagList().stream().mapToInt(Integer::intValue).toArray();
+    COMFile com = new COMFile("1.7", "4.0.0", tagList); // versi umum; cukup untuk uji
+    byte[] comBytes = com.getEncoded();
+    byte[] dg1Bytes = job.getDg1Bytes();
 
     // 4) Tulis EF.COM (CREATE FILE + SELECT + UPDATE BINARY)
     createEF(ch, EF_COM, comBytes.length, "CREATE EF.COM");
@@ -88,47 +85,52 @@ public class PersoMain {
     writeBinary(ch, dg1Bytes, "WRITE EF.DG1");
 
     // 6) Buat EF.DG2, EF.SOD, EF.DG15 dan tulis
-    int faceWidth = largeDG2 ? 720 : 480;
-    int faceHeight = largeDG2 ? 960 : 600;
-    SODArtifacts sodArtifacts = PersonalizationSupport.buildArtifacts(dg1Bytes, faceWidth, faceHeight, corruptDG2);
+    SODArtifacts sodArtifacts = PersonalizationSupport.buildArtifacts(job);
     System.out.printf("Synthetic biometrics → DG3=%d bytes, DG4=%d bytes.%n",
-        sodArtifacts.dg3Bytes != null ? sodArtifacts.dg3Bytes.length : 0,
-        sodArtifacts.dg4Bytes != null ? sodArtifacts.dg4Bytes.length : 0);
+        sodArtifacts.getDg3Bytes() != null ? sodArtifacts.getDg3Bytes().length : 0,
+        sodArtifacts.getDg4Bytes() != null ? sodArtifacts.getDg4Bytes().length : 0);
 
-    if (sodArtifacts.cardAccessBytes != null && sodArtifacts.cardAccessBytes.length > 0) {
-      createEF(ch, EF_CARD_ACCESS, sodArtifacts.cardAccessBytes.length, "CREATE EF.CardAccess");
+    byte[] cardAccessBytes = sodArtifacts.getCardAccessBytes();
+    if (cardAccessBytes != null && cardAccessBytes.length > 0) {
+      createEF(ch, EF_CARD_ACCESS, cardAccessBytes.length, "CREATE EF.CardAccess");
       selectEF(ch, EF_CARD_ACCESS, "SELECT EF.CardAccess before WRITE");
-      writeBinary(ch, sodArtifacts.cardAccessBytes, "WRITE EF.CardAccess");
+      writeBinary(ch, cardAccessBytes, "WRITE EF.CardAccess");
     }
 
-    createEF(ch, EF_DG2, sodArtifacts.dg2Bytes.length, "CREATE EF.DG2");
+    byte[] dg2Bytes = sodArtifacts.getDg2Bytes();
+    createEF(ch, EF_DG2, dg2Bytes.length, "CREATE EF.DG2");
     selectEF(ch, EF_DG2, "SELECT EF.DG2 before WRITE");
-    writeBinary(ch, sodArtifacts.dg2Bytes, "WRITE EF.DG2");
+    writeBinary(ch, dg2Bytes, "WRITE EF.DG2");
 
-    if (sodArtifacts.dg3Bytes != null && sodArtifacts.dg3Bytes.length > 0) {
-      createEF(ch, EF_DG3, sodArtifacts.dg3Bytes.length, "CREATE EF.DG3");
+    byte[] dg3Bytes = sodArtifacts.getDg3Bytes();
+    if (dg3Bytes != null && dg3Bytes.length > 0) {
+      createEF(ch, EF_DG3, dg3Bytes.length, "CREATE EF.DG3");
       selectEF(ch, EF_DG3, "SELECT EF.DG3 before WRITE");
-      writeBinary(ch, sodArtifacts.dg3Bytes, "WRITE EF.DG3");
+      writeBinary(ch, dg3Bytes, "WRITE EF.DG3");
     }
 
-    if (sodArtifacts.dg4Bytes != null && sodArtifacts.dg4Bytes.length > 0) {
-      createEF(ch, EF_DG4, sodArtifacts.dg4Bytes.length, "CREATE EF.DG4");
+    byte[] dg4Bytes = sodArtifacts.getDg4Bytes();
+    if (dg4Bytes != null && dg4Bytes.length > 0) {
+      createEF(ch, EF_DG4, dg4Bytes.length, "CREATE EF.DG4");
       selectEF(ch, EF_DG4, "SELECT EF.DG4 before WRITE");
-      writeBinary(ch, sodArtifacts.dg4Bytes, "WRITE EF.DG4");
+      writeBinary(ch, dg4Bytes, "WRITE EF.DG4");
     }
 
-    if (sodArtifacts.dg14Bytes != null && sodArtifacts.dg14Bytes.length > 0) {
-      createEF(ch, EF_DG14, sodArtifacts.dg14Bytes.length, "CREATE EF.DG14");
+    byte[] dg14Bytes = sodArtifacts.getDg14Bytes();
+    if (dg14Bytes != null && dg14Bytes.length > 0) {
+      createEF(ch, EF_DG14, dg14Bytes.length, "CREATE EF.DG14");
       selectEF(ch, EF_DG14, "SELECT EF.DG14 before WRITE");
-      writeBinary(ch, sodArtifacts.dg14Bytes, "WRITE EF.DG14");
+      writeBinary(ch, dg14Bytes, "WRITE EF.DG14");
     }
 
-    createEF(ch, EF_DG15, sodArtifacts.dg15Bytes.length, "CREATE EF.DG15");
+    byte[] dg15Bytes = sodArtifacts.getDg15Bytes();
+    createEF(ch, EF_DG15, dg15Bytes.length, "CREATE EF.DG15");
     selectEF(ch, EF_DG15, "SELECT EF.DG15 before WRITE");
-    writeBinary(ch, sodArtifacts.dg15Bytes, "WRITE EF.DG15");
-    createEF(ch, EF_SOD, sodArtifacts.sodBytes.length, "CREATE EF.SOD");
+    writeBinary(ch, dg15Bytes, "WRITE EF.DG15");
+    byte[] sodBytes = sodArtifacts.getSodBytes();
+    createEF(ch, EF_SOD, sodBytes.length, "CREATE EF.SOD");
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
-    writeBinary(ch, sodArtifacts.sodBytes, "WRITE EF.SOD");
+    writeBinary(ch, sodBytes, "WRITE EF.SOD");
 
     // 7) Simpan trust store untuk Passive Authentication verifier
     Path trustDir = Paths.get("target", "trust-store");
@@ -142,7 +144,7 @@ public class PersoMain {
       });
     }
     Files.deleteIfExists(trustDir.resolve("dsc.cer"));
-    Files.write(trustDir.resolve("csca.cer"), sodArtifacts.cscaCert.getEncoded());
+    Files.write(trustDir.resolve("csca.cer"), sodArtifacts.getCscaCert().getEncoded());
     System.out.println("Trust store updated -> " + trustDir.toAbsolutePath());
 
 //     // 1) Read full EF.DG1

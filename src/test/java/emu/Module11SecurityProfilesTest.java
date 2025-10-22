@@ -5,7 +5,6 @@ import org.jmrtd.lds.ChipAuthenticationInfo;
 import org.jmrtd.lds.PACEInfo;
 import org.jmrtd.lds.SecurityInfo;
 import org.jmrtd.lds.TerminalAuthenticationInfo;
-import org.jmrtd.lds.icao.DG1File;
 import org.jmrtd.lds.icao.DG14File;
 import org.jmrtd.lds.icao.MRZInfo;
 import org.junit.jupiter.api.Test;
@@ -41,7 +40,7 @@ class Module11SecurityProfilesTest {
   void cardAccessPublishesExpectedPaceProfiles() throws Exception {
     SODArtifacts artifacts = buildArtifacts();
 
-    CardAccessFile cardAccess = new CardAccessFile(new ByteArrayInputStream(artifacts.cardAccessBytes));
+    CardAccessFile cardAccess = new CardAccessFile(new ByteArrayInputStream(artifacts.getCardAccessBytes()));
     Collection<SecurityInfo> infos = cardAccess.getSecurityInfos();
     Set<String> paceOids = infos.stream()
         .filter(info -> info instanceof PACEInfo)
@@ -62,7 +61,7 @@ class Module11SecurityProfilesTest {
   void dg14AdvertisesChipAuthenticationVariantsAndTerminalReference() throws Exception {
     SODArtifacts artifacts = buildArtifacts();
 
-    DG14File dg14 = new DG14File(new ByteArrayInputStream(artifacts.dg14Bytes));
+    DG14File dg14 = new DG14File(new ByteArrayInputStream(artifacts.getDg14Bytes()));
     Set<String> chipOids = dg14.getChipAuthenticationInfos().stream()
         .map(SecurityInfo::getObjectIdentifier)
         .collect(Collectors.toSet());
@@ -150,8 +149,10 @@ class Module11SecurityProfilesTest {
         Gender.MALE,
         TestCardManager.DEFAULT_DOE,
         "");
-    DG1File dg1 = new DG1File(mrz);
-    return PersonalizationSupport.buildArtifacts(dg1.getEncoded(), 480, 600, false);
+    PersonalizationJob job = PersonalizationJob.builder()
+        .withMrzInfo(mrz)
+        .build();
+    return PersonalizationSupport.buildArtifacts(job);
   }
 
   private static KeyStore createKeyStore() throws Exception {

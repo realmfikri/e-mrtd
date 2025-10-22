@@ -51,17 +51,17 @@ import java.security.Security;
 import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.util.Arrays;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.math.BigInteger;
+import java.util.Set;
 
 final class PersonalizationSupport {
-
-  private static final String SIGNATURE_ALGORITHM = "SHA256withRSA";
 
   static {
     if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
@@ -72,29 +72,26 @@ final class PersonalizationSupport {
   private PersonalizationSupport() {
   }
 
-  static SODArtifacts buildArtifacts(byte[] dg1Bytes,
-                                     int imageWidth,
-                                     int imageHeight,
-                                     boolean corruptDG2)
+  static SODArtifacts buildArtifacts(PersonalizationJob job)
       throws GeneralSecurityException, OperatorCreationException, CertIOException, IOException {
-    SecureRandom random = new SecureRandom();
+    SecureRandom random = createRandom(job);
 
     KeyPairGenerator cscaGenerator = KeyPairGenerator.getInstance("RSA");
-    cscaGenerator.initialize(2048, random);
+    cscaGenerator.initialize(job.getCscaKeySize(), random);
     KeyPair cscaPair = cscaGenerator.generateKeyPair();
 
     KeyPairGenerator docSignerGenerator = KeyPairGenerator.getInstance("RSA");
-    docSignerGenerator.initialize(2048, random);
+    docSignerGenerator.initialize(job.getDocSignerKeySize(), random);
     KeyPair docSignerPair = docSignerGenerator.generateKeyPair();
 
     KeyPairGenerator aaGenerator = KeyPairGenerator.getInstance("RSA");
-    aaGenerator.initialize(1024, random);
+    aaGenerator.initialize(job.getAaKeySize(), random);
     KeyPair aaKeyPair = aaGenerator.generateKeyPair();
     if (Arrays.equals(docSignerPair.getPublic().getEncoded(), aaKeyPair.getPublic().getEncoded())) {
       throw new IllegalStateException("AA key pair must differ from document signer key pair");
     }
     KeyPairGenerator ecGenerator = KeyPairGenerator.getInstance("EC");
-    ecGenerator.initialize(new ECGenParameterSpec("secp256r1"));
+    ecGenerator.initialize(new ECGenParameterSpec(job.getChipAuthenticationCurve()), random);
     KeyPair chipAuthKeyPair = ecGenerator.generateKeyPair();
 
     Date notBefore = new Date(System.currentTimeMillis() - 24L * 60 * 60 * 1000);
@@ -108,6 +105,7 @@ final class PersonalizationSupport {
         true,
         notBefore,
         notAfter,
+        job.getSignatureAlgorithm(),
         random);
 
     X509Certificate docSignerCert = createCertificate(
@@ -118,9 +116,129 @@ final class PersonalizationSupport {
         false,
         notBefore,
         new Date(System.currentTimeMillis() + 180L * 24 * 60 * 60 * 1000),
+        job.getSignatureAlgorithm(),
         random);
 
-    byte[] jpegBytes = createSampleFaceImage(imageWidth, imageHeight);
+    Map<Integer, byte[]> dataGroupBytes = new LinkedHashMap<>();
+    Map<Integer, byte[]> hashes = new LinkedHashMap<>();
+    MessageDigest md = MessageDigest.getInstance(job.getDigestAlgorithm());
+
+    byte[] dg1Bytes = job.getDg1Bytes();
+    dataGroupBytes.put(Integer.valueOf(1), dg1Bytes.clone());
+    hashes.put(Integer.valueOf(1), digest(md, dg1Bytes));
+
+    byte[] dg2Bytes = null;
+    if (job.isDataGroupEnabled(2)) {
+      dg2Bytes = buildDg2(job);
+      dataGroupBytes.put(Integer.valueOf(2), dg2Bytes.clone());
+      hashes.put(Integer.valueOf(2), digest(md, dg2Bytes));
+    }
+
+    byte[] dg3Bytes = null;
+    if (job.isDataGroupEnabled(3)) {
+      dg3Bytes = buildDemoDG3(job.getFingerprintSource().getWidth(), job.getFingerprintSource().getHeight());
+      dataGroupBytes.put(Integer.valueOf(3), dg3Bytes.clone());
+      hashes.put(Integer.valueOf(3), digest(md, dg3Bytes));
+    }
+
+    byte[] dg4Bytes = null;
+    if (job.isDataGroupEnabled(4)) {
+      dg4Bytes = buildDemoDG4(job.getIrisSource().getWidth(), job.getIrisSource().getHeight());
+      dataGroupBytes.put(Integer.valueOf(4), dg4Bytes.clone());
+      hashes.put(Integer.valueOf(4), digest(md, dg4Bytes));
+    }
+
+    byte[] dg14Bytes = null;
+    if (job.isDataGroupEnabled(14)) {
+      List<SecurityInfo> dg14Infos = new ArrayList<>();
+      BigInteger chipKeyId = job.getChipAuthenticationKeyId();
+      dg14Infos.add(new ChipAuthenticationPublicKeyInfo(chipAuthKeyPair.getPublic(), chipKeyId));
+      dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_128, 2, chipKeyId));
+      dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_192, 2, chipKeyId));
+      dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_256, 2, chipKeyId));
+      dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_3DES_CBC_CBC, 2, chipKeyId));
+      if (job.includeTerminalAuthentication()) {
+        dg14Infos.add(new TerminalAuthenticationInfo((short) 0x011C, (byte) 0x1C));
+      }
+      DG14File dg14File = new DG14File(dg14Infos);
+      dg14Bytes = dg14File.getEncoded();
+      dataGroupBytes.put(Integer.valueOf(14), dg14Bytes.clone());
+      hashes.put(Integer.valueOf(14), digest(md, dg14Bytes));
+    }
+
+    byte[] dg15Bytes = null;
+    if (job.isDataGroupEnabled(15)) {
+      DG15File dg15File = new DG15File(aaKeyPair.getPublic());
+      dg15Bytes = dg15File.getEncoded();
+      dataGroupBytes.put(Integer.valueOf(15), dg15Bytes.clone());
+      hashes.put(Integer.valueOf(15), digest(md, dg15Bytes));
+    }
+
+    byte[] cardAccessBytes = null;
+    if (job.includeCardAccess() && !job.getPaceOids().isEmpty()) {
+      List<SecurityInfo> paceInfos = buildPaceInfos(job.getPaceOids());
+      CardAccessFile cardAccessFile = new CardAccessFile(paceInfos);
+      cardAccessBytes = cardAccessFile.getEncoded();
+    }
+
+    SODFile sodFile = new SODFile(job.getDigestAlgorithm(), job.getSignatureAlgorithm(), hashes, docSignerPair.getPrivate(), docSignerCert);
+    byte[] sodBytes = sodFile.getEncoded();
+
+    return new SODArtifacts(
+        job,
+        sodBytes,
+        dataGroupBytes,
+        hashes,
+        cardAccessBytes,
+        chipAuthKeyPair,
+        aaKeyPair,
+        docSignerPair,
+        cscaCert,
+        docSignerCert);
+  }
+
+  private static SecureRandom createRandom(PersonalizationJob job) {
+    Long seed = job.getDeterministicSeed();
+    if (seed == null) {
+      return new SecureRandom();
+    }
+    try {
+      SecureRandom seeded = SecureRandom.getInstance("SHA1PRNG");
+      seeded.setSeed(longToBytes(seed.longValue()));
+      return seeded;
+    } catch (GeneralSecurityException e) {
+      SecureRandom fallback = new SecureRandom();
+      fallback.setSeed(longToBytes(seed.longValue()));
+      return fallback;
+    }
+  }
+
+  private static byte[] longToBytes(long value) {
+    return ByteBuffer.allocate(Long.BYTES).putLong(value).array();
+  }
+
+  private static byte[] buildDg2(PersonalizationJob job) throws IOException {
+    PersonalizationJob.BiometricSource source = job.getFaceSource();
+    byte[] jpegBytes;
+    int width;
+    int height;
+    if (source.isSynthetic()) {
+      width = source.getWidth();
+      height = source.getHeight();
+      jpegBytes = createSampleFaceImage(width, height);
+    } else {
+      BufferedImage image = ImageIO.read(source.getPath().toFile());
+      if (image == null) {
+        throw new IOException("Failed to read face image: " + source.getPath());
+      }
+      width = image.getWidth();
+      height = image.getHeight();
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      if (!ImageIO.write(image, "jpg", out)) {
+        throw new IOException("Failed to encode face image as JPEG");
+      }
+      jpegBytes = out.toByteArray();
+    }
 
     FaceImageInfo faceImageInfo = new FaceImageInfo(
         net.sf.scuba.data.Gender.UNSPECIFIED,
@@ -136,75 +254,34 @@ final class PersonalizationSupport {
         0,
         85,
         null,
-        imageWidth,
-        imageHeight,
+        width,
+        height,
         new ByteArrayInputStream(jpegBytes),
         jpegBytes.length,
         FaceImageInfo.IMAGE_DATA_TYPE_JPEG);
 
     FaceInfo faceInfo = new FaceInfo(Collections.singletonList(faceImageInfo));
     DG2File dg2File = DG2File.createISO19794DG2File(Collections.singletonList(faceInfo));
-    byte[] dg2Bytes = dg2File.getEncoded();
-
-    DG15File dg15File = new DG15File(aaKeyPair.getPublic());
-    byte[] dg15Bytes = dg15File.getEncoded();
-
-    List<SecurityInfo> paceInfos = new ArrayList<>();
-    paceInfos.add(new PACEInfo(SecurityInfo.ID_PACE_ECDH_GM_AES_CBC_CMAC_128, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
-    paceInfos.add(new PACEInfo(SecurityInfo.ID_PACE_ECDH_IM_AES_CBC_CMAC_128, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
-    paceInfos.add(new PACEInfo(SecurityInfo.ID_PACE_ECDH_GM_3DES_CBC_CBC, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
-    paceInfos.add(new PACEInfo(SecurityInfo.ID_PACE_ECDH_IM_3DES_CBC_CBC, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
-    CardAccessFile cardAccessFile = new CardAccessFile(paceInfos);
-    byte[] cardAccessBytes = cardAccessFile.getEncoded();
-
-    List<SecurityInfo> dg14Infos = new ArrayList<>();
-    BigInteger chipKeyId = BigInteger.ONE;
-    dg14Infos.add(new ChipAuthenticationPublicKeyInfo(chipAuthKeyPair.getPublic(), chipKeyId));
-    dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_128, 2, chipKeyId));
-    dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_192, 2, chipKeyId));
-    dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_AES_CBC_CMAC_256, 2, chipKeyId));
-    dg14Infos.add(new ChipAuthenticationInfo(SecurityInfo.ID_CA_ECDH_3DES_CBC_CBC, 2, chipKeyId));
-    dg14Infos.add(new TerminalAuthenticationInfo((short) 0x011C, (byte) 0x1C));
-    DG14File dg14File = new DG14File(dg14Infos);
-    byte[] dg14Bytes = dg14File.getEncoded();
-
-    byte[] dg3Bytes = buildDemoDG3();
-    byte[] dg4Bytes = buildDemoDG4();
-
-    if (corruptDG2) {
-      dg2Bytes = corrupt(dg2Bytes);
+    byte[] encoded = dg2File.getEncoded();
+    if (job.isCorruptDg2()) {
+      encoded = corrupt(encoded);
     }
-
-    Map<Integer, byte[]> hashes = new HashMap<>();
-    MessageDigest md = MessageDigest.getInstance("SHA-256");
-    hashes.put(Integer.valueOf(1), md.digest(dg1Bytes));
-    hashes.put(Integer.valueOf(2), md.digest(dg2Bytes));
-    hashes.put(Integer.valueOf(3), md.digest(dg3Bytes));
-    hashes.put(Integer.valueOf(4), md.digest(dg4Bytes));
-    hashes.put(Integer.valueOf(14), md.digest(dg14Bytes));
-    hashes.put(Integer.valueOf(15), md.digest(dg15Bytes));
-
-    SODFile sodFile = new SODFile("SHA-256", SIGNATURE_ALGORITHM, hashes, docSignerPair.getPrivate(), docSignerCert);
-    byte[] sodBytes = sodFile.getEncoded();
-
-    return new SODArtifacts(
-        sodBytes,
-        dg2Bytes,
-        dg3Bytes,
-        dg4Bytes,
-        dg15Bytes,
-        dg14Bytes,
-        cardAccessBytes,
-        chipAuthKeyPair,
-        aaKeyPair,
-        docSignerPair,
-        cscaCert,
-        docSignerCert);
+    return encoded;
   }
 
-  private static byte[] buildDemoDG3() throws IOException {
-    int width = 160;
-    int height = 160;
+  private static List<SecurityInfo> buildPaceInfos(List<String> paceOids) {
+    List<SecurityInfo> paceInfos = new ArrayList<>();
+    for (String oid : paceOids) {
+      paceInfos.add(new PACEInfo(oid, 2, PACEInfo.PARAM_ID_ECP_NIST_P256_R1));
+    }
+    return paceInfos;
+  }
+
+  private static byte[] digest(MessageDigest md, byte[] value) {
+    return md.digest(value);
+  }
+
+  private static byte[] buildDemoDG3(int width, int height) throws IOException {
     byte[] fingerprintPixels = createFingerprintPixels(width, height);
 
     FingerImageInfo fingerImage = new FingerImageInfo(
@@ -235,9 +312,7 @@ final class PersonalizationSupport {
     return dg3File.getEncoded();
   }
 
-  private static byte[] buildDemoDG4() throws IOException {
-    int width = 160;
-    int height = 160;
+  private static byte[] buildDemoDG4(int width, int height) throws IOException {
     byte[] irisPixels = createIrisPixels(width, height);
 
     IrisImageInfo irisImage = new IrisImageInfo(
@@ -321,6 +396,7 @@ final class PersonalizationSupport {
                                                     boolean isCA,
                                                     Date notBefore,
                                                     Date notAfter,
+                                                    String signatureAlgorithm,
                                                     SecureRandom random) throws GeneralSecurityException, OperatorCreationException, CertIOException {
     X500Name subjectName = new X500Name(subject);
     X500Name issuerName = new X500Name(issuer);
@@ -340,7 +416,7 @@ final class PersonalizationSupport {
       builder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
     }
 
-    JcaContentSignerBuilder signerBuilder = new JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
+    JcaContentSignerBuilder signerBuilder = new JcaContentSignerBuilder(signatureAlgorithm)
         .setProvider(BouncyCastleProvider.PROVIDER_NAME);
     X509CertificateHolder holder = builder.build(signerBuilder.build(signingKey));
 
@@ -410,43 +486,131 @@ final class PersonalizationSupport {
   }
 
   static final class SODArtifacts {
-    final byte[] sodBytes;
-    final byte[] dg2Bytes;
-    final byte[] dg3Bytes;
-    final byte[] dg4Bytes;
-    final byte[] dg15Bytes;
-    final byte[] dg14Bytes;
-    final byte[] cardAccessBytes;
-    final KeyPair chipAuthKeyPair;
-    final KeyPair aaKeyPair;
-    final KeyPair docSignerKeyPair;
-    final X509Certificate cscaCert;
-    final X509Certificate docSignerCert;
+    private final PersonalizationJob job;
+    private final byte[] sodBytes;
+    private final Map<Integer, byte[]> dataGroupBytes;
+    private final Map<Integer, byte[]> hashes;
+    private final byte[] cardAccessBytes;
+    private final KeyPair chipAuthKeyPair;
+    private final KeyPair aaKeyPair;
+    private final KeyPair docSignerKeyPair;
+    private final X509Certificate cscaCert;
+    private final X509Certificate docSignerCert;
+    private final String digestAlgorithm;
+    private final String signatureAlgorithm;
 
-    SODArtifacts(byte[] sodBytes,
-                 byte[] dg2Bytes,
-                 byte[] dg3Bytes,
-                 byte[] dg4Bytes,
-                 byte[] dg15Bytes,
-                 byte[] dg14Bytes,
+    SODArtifacts(PersonalizationJob job,
+                 byte[] sodBytes,
+                 Map<Integer, byte[]> dataGroupBytes,
+                 Map<Integer, byte[]> hashes,
                  byte[] cardAccessBytes,
                  KeyPair chipAuthKeyPair,
                  KeyPair aaKeyPair,
                  KeyPair docSignerKeyPair,
                  X509Certificate cscaCert,
                  X509Certificate docSignerCert) {
-      this.sodBytes = sodBytes;
-      this.dg2Bytes = dg2Bytes;
-      this.dg3Bytes = dg3Bytes;
-      this.dg4Bytes = dg4Bytes;
-      this.dg15Bytes = dg15Bytes;
-      this.dg14Bytes = dg14Bytes;
-      this.cardAccessBytes = cardAccessBytes;
+      this.job = job;
+      this.sodBytes = sodBytes.clone();
+      this.dataGroupBytes = Collections.unmodifiableMap(cloneByteMap(dataGroupBytes));
+      this.hashes = Collections.unmodifiableMap(cloneByteMap(hashes));
+      this.cardAccessBytes = cardAccessBytes != null ? cardAccessBytes.clone() : null;
       this.chipAuthKeyPair = chipAuthKeyPair;
       this.aaKeyPair = aaKeyPair;
       this.docSignerKeyPair = docSignerKeyPair;
       this.cscaCert = cscaCert;
       this.docSignerCert = docSignerCert;
+      this.digestAlgorithm = job.getDigestAlgorithm();
+      this.signatureAlgorithm = job.getSignatureAlgorithm();
+    }
+
+    private Map<Integer, byte[]> cloneByteMap(Map<Integer, byte[]> source) {
+      Map<Integer, byte[]> copy = new LinkedHashMap<>();
+      for (Map.Entry<Integer, byte[]> entry : source.entrySet()) {
+        byte[] value = entry.getValue();
+        copy.put(entry.getKey(), value != null ? value.clone() : null);
+      }
+      return copy;
+    }
+
+    PersonalizationJob getJob() {
+      return job;
+    }
+
+    byte[] getSodBytes() {
+      return sodBytes.clone();
+    }
+
+    byte[] getCardAccessBytes() {
+      return cardAccessBytes != null ? cardAccessBytes.clone() : null;
+    }
+
+    Set<Integer> getPresentDataGroupNumbers() {
+      return dataGroupBytes.keySet();
+    }
+
+    Map<Integer, byte[]> getDataGroupHashes() {
+      return hashes;
+    }
+
+    Map<Integer, byte[]> getDataGroupBytesMap() {
+      return dataGroupBytes;
+    }
+
+    byte[] getDataGroupBytes(int dataGroupNumber) {
+      byte[] bytes = dataGroupBytes.get(Integer.valueOf(dataGroupNumber));
+      return bytes == null ? null : bytes.clone();
+    }
+
+    byte[] getDg2Bytes() {
+      return getDataGroupBytes(2);
+    }
+
+    byte[] getDg3Bytes() {
+      return getDataGroupBytes(3);
+    }
+
+    byte[] getDg4Bytes() {
+      return getDataGroupBytes(4);
+    }
+
+    byte[] getDg14Bytes() {
+      return getDataGroupBytes(14);
+    }
+
+    byte[] getDg15Bytes() {
+      return getDataGroupBytes(15);
+    }
+
+    KeyPair getChipAuthKeyPair() {
+      return chipAuthKeyPair;
+    }
+
+    KeyPair getAaKeyPair() {
+      return aaKeyPair;
+    }
+
+    KeyPair getDocSignerKeyPair() {
+      return docSignerKeyPair;
+    }
+
+    X509Certificate getCscaCert() {
+      return cscaCert;
+    }
+
+    X509Certificate getDocSignerCert() {
+      return docSignerCert;
+    }
+
+    String getDigestAlgorithm() {
+      return digestAlgorithm;
+    }
+
+    String getSignatureAlgorithm() {
+      return signatureAlgorithm;
+    }
+
+    List<String> getLifecycleTargets() {
+      return job.getLifecycleTargets();
     }
   }
 }

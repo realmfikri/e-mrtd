@@ -93,7 +93,7 @@ class Module8IntegrationTest {
     service.doBAC(card.bacKey);
 
     Path trustDir = Files.createTempDirectory("trust-store");
-    Files.write(trustDir.resolve("csca.cer"), card.artifacts.cscaCert.getEncoded());
+    Files.write(trustDir.resolve("csca.cer"), card.artifacts.getCscaCert().getEncoded());
 
     Result result = PassiveAuthentication.verify(service, trustDir, null);
     assertFalse(result.isPass(), "Passive authentication must fail after tampering");
@@ -118,8 +118,8 @@ class Module8IntegrationTest {
     service.doBAC(card.bacKey);
 
     Path masterListDir = Files.createTempDirectory("master-list");
-    Files.write(masterListDir.resolve("csca.cer"), card.artifacts.cscaCert.getEncoded());
-    Files.write(masterListDir.resolve("docsigner.cer"), card.artifacts.docSignerCert.getEncoded());
+    Files.write(masterListDir.resolve("csca.cer"), card.artifacts.getCscaCert().getEncoded());
+    Files.write(masterListDir.resolve("docsigner.cer"), card.artifacts.getDocSignerCert().getEncoded());
 
     List<Path> masterList = List.of(masterListDir);
     Result result = PassiveAuthentication.verify(service, masterList, null);
@@ -170,10 +170,10 @@ class Module8IntegrationTest {
     PublicKey dg15Key = dg15.getPublicKey();
     assertNotNull(dg15Key, "DG15 must expose a public key");
 
-    byte[] expectedAA = card.artifacts.aaKeyPair.getPublic().getEncoded();
+    byte[] expectedAA = card.artifacts.getAaKeyPair().getPublic().getEncoded();
     assertArrayEquals(expectedAA, dg15Key.getEncoded(), "DG15 should publish the AA key");
 
-    byte[] docSignerKey = card.artifacts.docSignerKeyPair.getPublic().getEncoded();
+    byte[] docSignerKey = card.artifacts.getDocSignerKeyPair().getPublic().getEncoded();
     assertFalse(Arrays.equals(docSignerKey, dg15Key.getEncoded()),
         "DG15 must not reuse the document signer key");
   }
