@@ -16,7 +16,6 @@ import org.jmrtd.BACKey;
 import org.jmrtd.PassportService;
 import org.jmrtd.lds.LDSFile;
 import org.jmrtd.lds.icao.COMFile;
-import org.jmrtd.lds.icao.DG1File;
 import org.jmrtd.lds.icao.MRZInfo;
 
 import java.io.ByteArrayOutputStream;
@@ -70,21 +69,17 @@ final class TestCardManager {
         Gender.MALE,
         DEFAULT_DOE,
         "");
-    DG1File dg1 = new DG1File(mrz);
-    byte[] dg1Bytes = dg1.getEncoded();
+    PersonalizationJob job = PersonalizationJob.builder()
+        .withMrzInfo(mrz)
+        .build();
 
-    int[] tagList = new int[]{
-        LDSFile.EF_DG1_TAG,
-        LDSFile.EF_DG2_TAG,
-        LDSFile.EF_DG3_TAG,
-        LDSFile.EF_DG4_TAG,
-        LDSFile.EF_DG14_TAG,
-        LDSFile.EF_DG15_TAG
-    };
+    int[] tagList = job.getComTagList().stream().mapToInt(Integer::intValue).toArray();
     COMFile com = new COMFile("1.7", "4.0.0", tagList);
     byte[] comBytes = com.getEncoded();
 
-    SODArtifacts artifacts = PersonalizationSupport.buildArtifacts(dg1Bytes, 480, 600, false);
+    byte[] dg1Bytes = job.getDg1Bytes();
+
+    SODArtifacts artifacts = PersonalizationSupport.buildArtifacts(job);
 
     createEF(channel, PassportService.EF_COM, comBytes.length);
     selectEF(channel, PassportService.EF_COM);
@@ -94,41 +89,48 @@ final class TestCardManager {
     selectEF(channel, PassportService.EF_DG1);
     writeBinary(channel, dg1Bytes);
 
-    if (artifacts.cardAccessBytes != null && artifacts.cardAccessBytes.length > 0) {
-      createEF(channel, PassportService.EF_CARD_ACCESS, artifacts.cardAccessBytes.length);
+    byte[] cardAccessBytes = artifacts.getCardAccessBytes();
+    if (cardAccessBytes != null && cardAccessBytes.length > 0) {
+      createEF(channel, PassportService.EF_CARD_ACCESS, cardAccessBytes.length);
       selectEF(channel, PassportService.EF_CARD_ACCESS);
-      writeBinary(channel, artifacts.cardAccessBytes);
+      writeBinary(channel, cardAccessBytes);
     }
 
-    createEF(channel, PassportService.EF_DG2, artifacts.dg2Bytes.length);
+    byte[] dg2Bytes = artifacts.getDg2Bytes();
+    createEF(channel, PassportService.EF_DG2, dg2Bytes.length);
     selectEF(channel, PassportService.EF_DG2);
-    writeBinary(channel, artifacts.dg2Bytes);
+    writeBinary(channel, dg2Bytes);
 
-    if (artifacts.dg3Bytes != null && artifacts.dg3Bytes.length > 0) {
-      createEF(channel, PassportService.EF_DG3, artifacts.dg3Bytes.length);
+    byte[] dg3Bytes = artifacts.getDg3Bytes();
+    if (dg3Bytes != null && dg3Bytes.length > 0) {
+      createEF(channel, PassportService.EF_DG3, dg3Bytes.length);
       selectEF(channel, PassportService.EF_DG3);
-      writeBinary(channel, artifacts.dg3Bytes);
+      writeBinary(channel, dg3Bytes);
     }
 
-    if (artifacts.dg4Bytes != null && artifacts.dg4Bytes.length > 0) {
-      createEF(channel, PassportService.EF_DG4, artifacts.dg4Bytes.length);
+    byte[] dg4Bytes = artifacts.getDg4Bytes();
+    if (dg4Bytes != null && dg4Bytes.length > 0) {
+      createEF(channel, PassportService.EF_DG4, dg4Bytes.length);
       selectEF(channel, PassportService.EF_DG4);
-      writeBinary(channel, artifacts.dg4Bytes);
+      writeBinary(channel, dg4Bytes);
     }
 
-    if (artifacts.dg14Bytes != null && artifacts.dg14Bytes.length > 0) {
-      createEF(channel, PassportService.EF_DG14, artifacts.dg14Bytes.length);
+    byte[] dg14Bytes = artifacts.getDg14Bytes();
+    if (dg14Bytes != null && dg14Bytes.length > 0) {
+      createEF(channel, PassportService.EF_DG14, dg14Bytes.length);
       selectEF(channel, PassportService.EF_DG14);
-      writeBinary(channel, artifacts.dg14Bytes);
+      writeBinary(channel, dg14Bytes);
     }
 
-    createEF(channel, PassportService.EF_DG15, artifacts.dg15Bytes.length);
+    byte[] dg15Bytes = artifacts.getDg15Bytes();
+    createEF(channel, PassportService.EF_DG15, dg15Bytes.length);
     selectEF(channel, PassportService.EF_DG15);
-    writeBinary(channel, artifacts.dg15Bytes);
+    writeBinary(channel, dg15Bytes);
 
-    createEF(channel, PassportService.EF_SOD, artifacts.sodBytes.length);
+    byte[] sodBytes = artifacts.getSodBytes();
+    createEF(channel, PassportService.EF_SOD, sodBytes.length);
     selectEF(channel, PassportService.EF_SOD);
-    writeBinary(channel, artifacts.sodBytes);
+    writeBinary(channel, sodBytes);
 
     if (tamperDg1) {
       byte[] mutated = Arrays.copyOf(dg1Bytes, dg1Bytes.length);
@@ -139,7 +141,7 @@ final class TestCardManager {
 
     byte[] mrzSeed = buildMrzSeed(DEFAULT_DOC, DEFAULT_DOB, DEFAULT_DOE);
     putData(channel, 0x00, 0x62, mrzSeed);
-    seedActiveAuthenticationKey(channel, artifacts.aaKeyPair.getPrivate());
+    seedActiveAuthenticationKey(channel, artifacts.getAaKeyPair().getPrivate());
 
     putData(channel, 0xDE, 0xAF, new byte[0]);
     putData(channel, 0xDE, 0xAD, new byte[0]);

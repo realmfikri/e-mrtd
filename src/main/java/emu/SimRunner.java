@@ -219,7 +219,7 @@ public final class SimRunner {
     // --- sekarang baca via PassportService + BAC ---
     byte[] rawCardAccess = readEfPlain(ch, EF_CARD_ACCESS);
     if ((rawCardAccess == null || rawCardAccess.length == 0) && personalizationArtifacts != null) {
-      rawCardAccess = personalizationArtifacts.cardAccessBytes;
+      rawCardAccess = personalizationArtifacts.getCardAccessBytes();
     }
     if (rawCardAccess != null) {
       System.out.printf("EF.CardAccess length=%d bytes%n", rawCardAccess.length);
@@ -407,21 +407,20 @@ public final class SimRunner {
       String doc,
       String dob,
       String doe) throws Exception {
-    int[] tagList = new int[]{
-        LDSFile.EF_DG1_TAG,
-        LDSFile.EF_DG2_TAG,
-        LDSFile.EF_DG3_TAG,
-        LDSFile.EF_DG4_TAG,
-        LDSFile.EF_DG14_TAG,
-        LDSFile.EF_DG15_TAG
-    };
-    COMFile com = new COMFile("1.7", "4.0.0", tagList);
-    byte[] comBytes = com.getEncoded();
-
     MRZInfo mrz = new MRZInfo("P<", "UTO", "BEAN", "HAPPY",
         doc, "UTO", dob, Gender.MALE, doe, "");
-    DG1File dg1 = new DG1File(mrz);
-    byte[] dg1Bytes = dg1.getEncoded();
+    int faceWidth = largeDG2 ? 720 : 480;
+    int faceHeight = largeDG2 ? 960 : 600;
+    PersonalizationJob job = PersonalizationJob.builder()
+        .withMrzInfo(mrz)
+        .withFaceSyntheticSize(faceWidth, faceHeight)
+        .corruptDg2(corruptDG2)
+        .build();
+
+    int[] tagList = job.getComTagList().stream().mapToInt(Integer::intValue).toArray();
+    COMFile com = new COMFile("1.7", "4.0.0", tagList);
+    byte[] comBytes = com.getEncoded();
+    byte[] dg1Bytes = job.getDg1Bytes();
 
     createEF(ch, EF_COM, comBytes.length, "CREATE EF.COM");
     selectEF(ch, EF_COM, "SELECT EF.COM before WRITE");
@@ -431,51 +430,56 @@ public final class SimRunner {
     selectEF(ch, EF_DG1, "SELECT EF.DG1 before WRITE");
     writeBinary(ch, dg1Bytes, "WRITE EF.DG1");
 
-    int faceWidth = largeDG2 ? 720 : 480;
-    int faceHeight = largeDG2 ? 960 : 600;
-    SODArtifacts artifacts = PersonalizationSupport.buildArtifacts(dg1Bytes, faceWidth, faceHeight, corruptDG2);
+    SODArtifacts artifacts = PersonalizationSupport.buildArtifacts(job);
     System.out.printf("Synthetic biometrics → DG3=%d bytes, DG4=%d bytes.%n",
-        artifacts.dg3Bytes != null ? artifacts.dg3Bytes.length : 0,
-        artifacts.dg4Bytes != null ? artifacts.dg4Bytes.length : 0);
+        artifacts.getDg3Bytes() != null ? artifacts.getDg3Bytes().length : 0,
+        artifacts.getDg4Bytes() != null ? artifacts.getDg4Bytes().length : 0);
 
-    if (artifacts.cardAccessBytes != null && artifacts.cardAccessBytes.length > 0) {
-      createEF(ch, EF_CARD_ACCESS, artifacts.cardAccessBytes.length, "CREATE EF.CardAccess");
+    byte[] cardAccessBytes = artifacts.getCardAccessBytes();
+    if (cardAccessBytes != null && cardAccessBytes.length > 0) {
+      createEF(ch, EF_CARD_ACCESS, cardAccessBytes.length, "CREATE EF.CardAccess");
       selectEF(ch, EF_CARD_ACCESS, "SELECT EF.CardAccess before WRITE");
-      writeBinary(ch, artifacts.cardAccessBytes, "WRITE EF.CardAccess");
+      writeBinary(ch, cardAccessBytes, "WRITE EF.CardAccess");
     }
 
-    createEF(ch, EF_DG15, artifacts.dg15Bytes.length, "CREATE EF.DG15");
+    byte[] dg15Bytes = artifacts.getDg15Bytes();
+    createEF(ch, EF_DG15, dg15Bytes.length, "CREATE EF.DG15");
     selectEF(ch, EF_DG15, "SELECT EF.DG15 before WRITE");
-    writeBinary(ch, artifacts.dg15Bytes, "WRITE EF.DG15");
+    writeBinary(ch, dg15Bytes, "WRITE EF.DG15");
 
-    if (artifacts.dg14Bytes != null && artifacts.dg14Bytes.length > 0) {
-      createEF(ch, EF_DG14, artifacts.dg14Bytes.length, "CREATE EF.DG14");
+    byte[] dg14Bytes = artifacts.getDg14Bytes();
+    if (dg14Bytes != null && dg14Bytes.length > 0) {
+      createEF(ch, EF_DG14, dg14Bytes.length, "CREATE EF.DG14");
       selectEF(ch, EF_DG14, "SELECT EF.DG14 before WRITE");
-      writeBinary(ch, artifacts.dg14Bytes, "WRITE EF.DG14");
+      writeBinary(ch, dg14Bytes, "WRITE EF.DG14");
     }
 
-    createEF(ch, EF_DG2, artifacts.dg2Bytes.length, "CREATE EF.DG2");
+    byte[] dg2Bytes = artifacts.getDg2Bytes();
+    createEF(ch, EF_DG2, dg2Bytes.length, "CREATE EF.DG2");
     selectEF(ch, EF_DG2, "SELECT EF.DG2 before WRITE");
-    writeBinary(ch, artifacts.dg2Bytes, "WRITE EF.DG2");
+    writeBinary(ch, dg2Bytes, "WRITE EF.DG2");
 
-    if (artifacts.dg3Bytes != null && artifacts.dg3Bytes.length > 0) {
-      createEF(ch, EF_DG3, artifacts.dg3Bytes.length, "CREATE EF.DG3");
+    byte[] dg3Bytes = artifacts.getDg3Bytes();
+    if (dg3Bytes != null && dg3Bytes.length > 0) {
+      createEF(ch, EF_DG3, dg3Bytes.length, "CREATE EF.DG3");
       selectEF(ch, EF_DG3, "SELECT EF.DG3 before WRITE");
-      writeBinary(ch, artifacts.dg3Bytes, "WRITE EF.DG3");
+      writeBinary(ch, dg3Bytes, "WRITE EF.DG3");
     }
 
-    if (artifacts.dg4Bytes != null && artifacts.dg4Bytes.length > 0) {
-      createEF(ch, EF_DG4, artifacts.dg4Bytes.length, "CREATE EF.DG4");
+    byte[] dg4Bytes = artifacts.getDg4Bytes();
+    if (dg4Bytes != null && dg4Bytes.length > 0) {
+      createEF(ch, EF_DG4, dg4Bytes.length, "CREATE EF.DG4");
       selectEF(ch, EF_DG4, "SELECT EF.DG4 before WRITE");
-      writeBinary(ch, artifacts.dg4Bytes, "WRITE EF.DG4");
+      writeBinary(ch, dg4Bytes, "WRITE EF.DG4");
     }
 
-    createEF(ch, EF_SOD, artifacts.sodBytes.length, "CREATE EF.SOD");
+    byte[] sodBytes = artifacts.getSodBytes();
+    createEF(ch, EF_SOD, sodBytes.length, "CREATE EF.SOD");
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
-    writeBinary(ch, artifacts.sodBytes, "WRITE EF.SOD");
+    writeBinary(ch, sodBytes, "WRITE EF.SOD");
 
-    if (artifacts.aaKeyPair != null && artifacts.aaKeyPair.getPrivate() != null) {
-      seedActiveAuthenticationKey(ch, artifacts.aaKeyPair.getPrivate());
+    if (artifacts.getAaKeyPair() != null && artifacts.getAaKeyPair().getPrivate() != null) {
+      seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
 
     Path trustDir = Paths.get("target", "trust-store");
@@ -489,7 +493,7 @@ public final class SimRunner {
       });
     }
     Files.deleteIfExists(trustDir.resolve("dsc.cer"));
-    Files.write(trustDir.resolve("csca.cer"), artifacts.cscaCert.getEncoded());
+    Files.write(trustDir.resolve("csca.cer"), artifacts.getCscaCert().getEncoded());
     return artifacts;
   }
 
