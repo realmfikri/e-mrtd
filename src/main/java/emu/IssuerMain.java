@@ -3,410 +3,47 @@ package emu;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.licel.jcardsim.smartcardio.CardSimulator;
-import com.licel.jcardsim.smartcardio.CardTerminalSimulator;
-import javacard.framework.AID;
-
-import javax.smartcardio.Card;
-import javax.smartcardio.CardChannel;
-import javax.smartcardio.CardException;
-import javax.smartcardio.CardTerminal;
-import javax.smartcardio.CommandAPDU;
-import javax.smartcardio.ResponseAPDU;
 
 import net.sf.scuba.data.Gender;
-import net.sf.scuba.smartcards.CardService;
-import net.sf.scuba.smartcards.TerminalCardService;
 
-import org.jmrtd.BACKey;
-import org.jmrtd.PassportService;
-import org.jmrtd.lds.icao.COMFile;
-import org.jmrtd.lds.icao.DG2File;
 import org.jmrtd.lds.icao.MRZInfo;
-import org.jmrtd.lds.iso19794.FaceImageInfo;
-import org.jmrtd.lds.iso19794.FaceInfo;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigInteger;
-import java.security.cert.CertificateEncodingException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import emu.PersonalizationSupport.SODArtifacts;
+import emu.IssuerSimulator;
+import emu.IssuerSimulator.Result;
 
 public final class IssuerMain {
 
-  private static final byte[] MRTD_AID = new byte[]{(byte) 0xA0, 0x00, 0x00, 0x02, 0x47, 0x10, 0x01};
-
-  private static final short EF_COM = PassportService.EF_COM;
-  private static final short EF_SOD = PassportService.EF_SOD;
-  private static final short EF_CARD_ACCESS = PassportService.EF_CARD_ACCESS;
-
   public static void main(String[] args) throws Exception {
     RunOptions options = RunOptions.parse(args);
+    if (options.showHelp) {
+      RunOptions.printUsage();
+      return;
+    }
     PersonalizationJob job = options.buildJob();
-    IssuerMain issuer = new IssuerMain();
-    issuer.execute(job, options);
+    new IssuerMain().execute(job, options);
   }
 
   private void execute(PersonalizationJob job, RunOptions options) throws Exception {
     Objects.requireNonNull(job, "job");
     Objects.requireNonNull(options, "options");
 
-    Path outputDir = options.outputDirectory != null ? options.outputDirectory : Paths.get("target", "issuer");
-    Files.createDirectories(outputDir);
-
-    CardSimulator simulator = new CardSimulator();
-    AID aid = new AID(MRTD_AID, (short) 0, (byte) MRTD_AID.length);
-    simulator.installApplet(aid, sos.passportapplet.PassportApplet.class);
-
-    CardTerminal terminal = CardTerminalSimulator.terminal(simulator);
-    Card card = terminal.connect("*");
-    CardChannel channel = card.getBasicChannel();
-
-    selectApplet(channel);
-
-    int[] tagList = job.getComTagList().stream().mapToInt(Integer::intValue).toArray();
-    COMFile comFile = new COMFile("1.7", "4.0.0", tagList);
-    byte[] comBytes = comFile.getEncoded();
-
-    SODArtifacts artifacts = PersonalizationSupport.buildArtifacts(job);
-
-    createEf(channel, EF_COM, comBytes.length, "CREATE EF.COM");
-    selectEf(channel, EF_COM, "SELECT EF.COM");
-    writeBinary(channel, comBytes, "WRITE EF.COM");
-
-    for (Map.Entry<Integer, byte[]> entry : artifacts.getDataGroupBytesMap().entrySet()) {
-      int dg = entry.getKey();
-      byte[] data = entry.getValue();
-      if (data == null || data.length == 0) {
-        continue;
-      }
-      short fid = (short) (0x0100 | (dg & 0xFF));
-      createEf(channel, fid, data.length, "CREATE EF.DG" + dg);
-      selectEf(channel, fid, "SELECT EF.DG" + dg);
-      writeBinary(channel, data, "WRITE EF.DG" + dg);
-    }
-
-    byte[] cardAccessBytes = artifacts.getCardAccessBytes();
-    if (cardAccessBytes != null && cardAccessBytes.length > 0) {
-      createEf(channel, EF_CARD_ACCESS, cardAccessBytes.length, "CREATE EF.CardAccess");
-      selectEf(channel, EF_CARD_ACCESS, "SELECT EF.CardAccess");
-      writeBinary(channel, cardAccessBytes, "WRITE EF.CardAccess");
-    }
-
-    byte[] sodBytes = artifacts.getSodBytes();
-    createEf(channel, EF_SOD, sodBytes.length, "CREATE EF.SOD");
-    selectEf(channel, EF_SOD, "SELECT EF.SOD");
-    writeBinary(channel, sodBytes, "WRITE EF.SOD");
-
-    if (!options.omitSecrets && !options.omitMrzSecret) {
-      byte[] mrzSeed = IssuerSecretEncoder.encodeMrzSeed(job.getMrzInfo());
-      putData(channel, 0x00, 0x62, mrzSeed, "PUT MRZ TLV");
-    }
-    if (!options.omitSecrets && !options.omitPaceSecrets) {
-      byte[] paceSecrets = IssuerSecretEncoder.encodePaceSecrets(options.paceCan, options.pacePin, options.pacePuk);
-      if (paceSecrets != null) {
-        putData(channel, 0x00, 0x65, paceSecrets, "PUT PACE secrets TLV");
-      }
-    }
-
-    if (options.openComSodReads != null) {
-      byte[] toggle = new byte[]{(byte) (options.openComSodReads ? 0x01 : 0x00)};
-      putData(channel, 0xDE, 0xFE, toggle,
-          options.openComSodReads ? "ENABLE open COM/SOD reads" : "DISABLE open COM/SOD reads");
-    }
-
-    for (String lifecycle : job.getLifecycleTargets()) {
-      String normalized = lifecycle.toUpperCase(Locale.ROOT);
-      if ("PERSONALIZED".equals(normalized)) {
-        putData(channel, 0xDE, 0xAF, new byte[0], "SET LIFECYCLE → PERSONALIZED");
-      } else if ("LOCKED".equals(normalized) && !options.leavePersonalized) {
-        putData(channel, 0xDE, 0xAD, new byte[0], "SET LIFECYCLE → LOCKED");
-      }
-    }
-
-    card.disconnect(false);
-
-    Path facePreviewPath = null;
-    if (options.facePreview) {
-      byte[] dg2Bytes = artifacts.getDataGroupBytes(2);
-      if (dg2Bytes != null && dg2Bytes.length > 0) {
-        Path previewDir = options.facePreviewDirectory != null ? options.facePreviewDirectory : outputDir.resolve("preview");
-        facePreviewPath = exportFacePreview(dg2Bytes, previewDir);
-      }
-    }
-
-    Map<String, Object> manifest = buildManifest(job, artifacts, comBytes, cardAccessBytes, outputDir, facePreviewPath);
-    ValidationSummary validationSummary = null;
-    if (options.validate) {
-      validationSummary = runValidation(terminal, job, options);
-      if (validationSummary != null && validationSummary.passiveAuthentication != null) {
-        manifest.put("passiveAuthentication", toManifest(validationSummary.passiveAuthentication));
-      }
-    }
-
-    writeManifest(outputDir, manifest);
-  }
-
-  private ValidationSummary runValidation(CardTerminal terminal, PersonalizationJob job, RunOptions options)
-      throws Exception {
-    TerminalCardService terminalService = new TerminalCardService(terminal);
-    terminalService.open();
-    try {
-      CardService logging = new LoggingCardService(terminalService, null);
-      logging.open();
-      try {
-        PassportService service = new PassportService(
-            logging,
-            PassportService.DEFAULT_MAX_BLOCKSIZE,
-            PassportService.DEFAULT_MAX_BLOCKSIZE,
-            false,
-            false);
-        service.open();
-        service.sendSelectApplet(false);
-        MRZInfo mrz = job.getMrzInfo();
-        BACKey bacKey = new BACKey(mrz.getDocumentNumber(), mrz.getDateOfBirth(), mrz.getDateOfExpiry());
-        service.doBAC(bacKey);
-        PassiveAuthentication.Result result = PassiveAuthentication.verify(service, Collections.emptyList(), null);
-        System.out.println("Passive Authentication → " + (result.isPass() ? "PASS" : "FAIL"));
-        return new ValidationSummary(result);
-      } finally {
-        logging.close();
-      }
-    } finally {
-      terminalService.close();
-    }
-  }
-
-  private Map<String, Object> buildManifest(
-      PersonalizationJob job,
-      SODArtifacts artifacts,
-      byte[] comBytes,
-      byte[] cardAccessBytes,
-      Path outputDir,
-      Path facePreviewPath) throws IOException {
-    Map<String, Object> manifest = new LinkedHashMap<>();
-    MRZInfo mrz = job.getMrzInfo();
-    Map<String, Object> mrzSection = new LinkedHashMap<>();
-    mrzSection.put("documentNumber", mrz.getDocumentNumber());
-    mrzSection.put("issuingState", mrz.getIssuingState());
-    mrzSection.put("nationality", mrz.getNationality());
-    mrzSection.put("dateOfBirth", mrz.getDateOfBirth());
-    mrzSection.put("dateOfExpiry", mrz.getDateOfExpiry());
-    mrzSection.put("primaryIdentifier", mrz.getPrimaryIdentifier());
-    mrzSection.put("secondaryIdentifier", mrz.getSecondaryIdentifier());
-    manifest.put("mrz", mrzSection);
-    manifest.put("digestAlgorithm", artifacts.getDigestAlgorithm());
-    manifest.put("signatureAlgorithm", artifacts.getSignatureAlgorithm());
-    manifest.put("lifecycleTargets", job.getLifecycleTargets());
-
-    List<Map<String, Object>> dataGroups = new ArrayList<>();
-    for (Map.Entry<Integer, byte[]> entry : artifacts.getDataGroupBytesMap().entrySet()) {
-      int dg = entry.getKey();
-      byte[] data = entry.getValue();
-      if (data == null) {
-        continue;
-      }
-      Path file = outputDir.resolve(String.format("EF.DG%d.bin", dg));
-      Files.write(file, data);
-      Map<String, Object> entryMap = new LinkedHashMap<>();
-      entryMap.put("dg", dg);
-      entryMap.put("path", outputDir.relativize(file).toString());
-      entryMap.put("length", data.length);
-      dataGroups.add(entryMap);
-    }
-    manifest.put("dataGroups", dataGroups);
-
-    Path comPath = outputDir.resolve("EF.COM.bin");
-    Files.write(comPath, comBytes);
-    manifest.put("efCom", outputDir.relativize(comPath).toString());
-
-    Path sodPath = outputDir.resolve("EF.SOD.bin");
-    Files.write(sodPath, artifacts.getSodBytes());
-    manifest.put("efSod", outputDir.relativize(sodPath).toString());
-
-    if (cardAccessBytes != null && cardAccessBytes.length > 0) {
-      Path caPath = outputDir.resolve("EF.CardAccess.bin");
-      Files.write(caPath, cardAccessBytes);
-      manifest.put("efCardAccess", outputDir.relativize(caPath).toString());
-    }
-
-    Map<String, Object> certificates = new LinkedHashMap<>();
-    Path cscaPath = outputDir.resolve("CSCA.cer");
-    try {
-      Files.write(cscaPath, artifacts.getCscaCert().getEncoded());
-    } catch (CertificateEncodingException e) {
-      throw new IOException("Failed to encode CSCA certificate", e);
-    }
-    certificates.put("csca", outputDir.relativize(cscaPath).toString());
-    Path dscPath = outputDir.resolve("DSC.cer");
-    try {
-      Files.write(dscPath, artifacts.getDocSignerCert().getEncoded());
-    } catch (CertificateEncodingException e) {
-      throw new IOException("Failed to encode DSC certificate", e);
-    }
-    certificates.put("dsc", outputDir.relativize(dscPath).toString());
-    manifest.put("certificates", certificates);
-
-    if (artifacts.getJob().includeTerminalAuthentication()) {
-      manifest.put("taChain", Collections.emptyList());
-    }
-    if (facePreviewPath != null) {
-      Path absolutePreview = facePreviewPath.toAbsolutePath();
-      Path base = outputDir.toAbsolutePath();
-      Path previewRelative = absolutePreview.startsWith(base)
-          ? base.relativize(absolutePreview)
-          : absolutePreview;
-      manifest.put("facePreview", previewRelative.toString());
-    }
-
-    return manifest;
-  }
-
-  private Map<String, Object> toManifest(PassiveAuthentication.Result result) {
-    Map<String, Object> map = new LinkedHashMap<>();
-    map.put("pass", result.isPass());
-    map.put("okDataGroups", result.getOkDataGroups());
-    map.put("badDataGroups", result.getBadDataGroups());
-    map.put("missingDataGroups", result.getMissingDataGroups());
-    map.put("lockedDataGroups", result.getLockedDataGroups());
-    map.put("trustIssues", result.getTrustStoreIssues());
-    return map;
-  }
-
-  private Path exportFacePreview(byte[] dg2Bytes, Path directory) throws IOException {
-    if (dg2Bytes == null || dg2Bytes.length == 0 || directory == null) {
-      return null;
-    }
-    Files.createDirectories(directory);
-    try (ByteArrayInputStream in = new ByteArrayInputStream(dg2Bytes)) {
-      DG2File dg2 = new DG2File(in);
-      List<FaceInfo> faces = dg2.getFaceInfos();
-      for (int i = 0; i < faces.size(); i++) {
-        FaceInfo faceInfo = faces.get(i);
-        List<FaceImageInfo> images = faceInfo.getFaceImageInfos();
-        for (int j = 0; j < images.size(); j++) {
-          FaceImageInfo imageInfo = images.get(j);
-          String extension = mimeToExtension(imageInfo.getMimeType());
-          String fileName = String.format("face-preview-%d-%d.%s", i + 1, j + 1, extension);
-          Path target = directory.resolve(fileName);
-          try (InputStream imageStream = imageInfo.getImageInputStream()) {
-            Files.write(target, imageStream.readAllBytes());
-          }
-          return target;
-        }
-      }
-    } catch (IOException e) {
-      throw e;
-    } catch (Exception e) {
-      throw new IOException("Failed to parse DG2 for face preview", e);
-    }
-    return null;
-  }
-
-  private static String mimeToExtension(String mime) {
-    if (mime == null) {
-      return "bin";
-    }
-    String normalized = mime.toLowerCase(Locale.ROOT);
-    if (normalized.contains("jpeg") || normalized.contains("jpg")) {
-      return "jpg";
-    }
-    if (normalized.contains("png")) {
-      return "png";
-    }
-    if (normalized.contains("jp2")) {
-      return "jp2";
-    }
-    return "bin";
-  }
-
-  private void writeManifest(Path outputDir, Map<String, Object> manifest) throws IOException {
-    ObjectMapper mapper = new ObjectMapper();
-    Path target = outputDir.resolve("manifest.json");
-    mapper.writerWithDefaultPrettyPrinter().writeValue(target.toFile(), manifest);
-    System.out.println("Manifest written to " + target.toAbsolutePath());
-  }
-
-  private static void selectApplet(CardChannel channel) throws CardException {
-    byte[] command = new byte[5 + MRTD_AID.length];
-    command[0] = 0x00;
-    command[1] = (byte) 0xA4;
-    command[2] = 0x04;
-    command[3] = 0x0C;
-    command[4] = (byte) MRTD_AID.length;
-    System.arraycopy(MRTD_AID, 0, command, 5, MRTD_AID.length);
-    ResponseAPDU response = channel.transmit(new CommandAPDU(command));
-    if (response.getSW() != 0x9000) {
-      throw new CardException(String.format("SELECT AID failed: SW=%04X", response.getSW()));
-    }
-  }
-
-  private static void createEf(CardChannel channel, short fid, int size, String label) throws CardException {
-    byte[] fcp = new byte[]{
-        (byte) 0x63, 0x04,
-        (byte) ((size >> 8) & 0xFF), (byte) (size & 0xFF),
-        (byte) ((fid >> 8) & 0xFF), (byte) (fid & 0xFF)
-    };
-    transmit(channel, 0x00, 0xE0, 0x00, 0x00, fcp, label);
-  }
-
-  private static void selectEf(CardChannel channel, short fid, String label) throws CardException {
-    byte[] cmd = new byte[]{0x00, (byte) 0xA4, 0x02, 0x0C, 0x02, (byte) ((fid >> 8) & 0xFF), (byte) (fid & 0xFF)};
-    transmit(channel, cmd, label);
-  }
-
-  private static void writeBinary(CardChannel channel, byte[] data, String label) throws CardException {
-    int offset = 0;
-    while (offset < data.length) {
-      int len = Math.min(0xFF, data.length - offset);
-      byte[] chunk = Arrays.copyOfRange(data, offset, offset + len);
-      transmit(channel, 0x00, 0xD6, (offset >> 8) & 0xFF, offset & 0xFF, chunk,
-          label + String.format(" [%d..%d]", offset, offset + len));
-      offset += len;
-    }
-  }
-
-  private static void putData(CardChannel channel, int p1, int p2, byte[] data, String label) throws CardException {
-    transmit(channel, 0x00, 0xDA, p1, p2, data, label);
-  }
-
-  private static void transmit(CardChannel channel, byte[] command, String label) throws CardException {
-    ResponseAPDU response = channel.transmit(new CommandAPDU(command));
-    if (response.getSW() != 0x9000) {
-      throw new CardException(String.format("%s failed: SW=%04X", label, response.getSW()));
-    }
-  }
-
-  private static void transmit(CardChannel channel, int cla, int ins, int p1, int p2, byte[] data, String label)
-      throws CardException {
-    ResponseAPDU response = channel.transmit(new CommandAPDU(cla, ins, p1, p2, data));
-    if (response.getSW() != 0x9000) {
-      throw new CardException(String.format("%s failed: SW=%04X", label, response.getSW()));
-    }
-  }
-
-  private static final class ValidationSummary {
-    final PassiveAuthentication.Result passiveAuthentication;
-
-    ValidationSummary(PassiveAuthentication.Result passiveAuthentication) {
-      this.passiveAuthentication = passiveAuthentication;
-    }
+    IssuerSimulator simulator = new IssuerSimulator();
+    Result result = simulator.run(job, options.toSimulatorOptions());
+    options.report(result);
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
@@ -589,6 +226,8 @@ public final class IssuerMain {
     Path outputDirectory = Paths.get("target", "issuer");
     boolean facePreview;
     Path facePreviewDirectory;
+    List<Path> validationTrustAnchors = List.of();
+    boolean showHelp;
 
     static RunOptions parse(String[] args) throws IOException {
       RunOptions options = new RunOptions();
@@ -620,6 +259,10 @@ public final class IssuerMain {
           continue;
         }
         if (arg.startsWith("--job-json=")) {
+          continue;
+        }
+        if (arg.equals("--help") || arg.equals("-h")) {
+          options.showHelp = true;
           continue;
         }
         if (arg.startsWith("--doc-number")) {
@@ -1082,6 +725,67 @@ public final class IssuerMain {
         builder.lifecycleTargets(lifecycleTargets);
       }
       return builder.build();
+    }
+
+    IssuerSimulator.Options toSimulatorOptions() {
+      IssuerSimulator.Options opts = new IssuerSimulator.Options()
+          .outputDirectory(outputDirectory)
+          .omitSecrets(omitSecrets)
+          .includeMrzSecret(!omitMrzSecret)
+          .includePaceSecrets(!omitPaceSecrets)
+          .paceCan(paceCan)
+          .pacePin(pacePin)
+          .pacePuk(pacePuk)
+          .openComSodReads(openComSodReads)
+          .leavePersonalized(leavePersonalized)
+          .validate(validate)
+          .facePreview(facePreview)
+          .facePreviewDirectory(facePreviewDirectory)
+          .validationTrustAnchors(validationTrustAnchors);
+      return opts;
+    }
+
+    void report(Result result) {
+      Path output = result.getOutputDirectory();
+      System.out.println("Issuer output → " + output.toAbsolutePath());
+      System.out.println("Manifest      → " + result.getManifestPath().toAbsolutePath());
+      Path csca = output.resolve("CSCA.cer");
+      if (Files.exists(csca)) {
+        System.out.println("CSCA anchor   → " + csca.toAbsolutePath());
+      }
+      Path dsc = output.resolve("DSC.cer");
+      if (Files.exists(dsc)) {
+        System.out.println("DSC cert      → " + dsc.toAbsolutePath());
+      }
+      result.getFacePreviewPath().ifPresent(path ->
+          System.out.println("Face preview  → " + path.toAbsolutePath()));
+      result.getPassiveAuthenticationResult().ifPresent(pa ->
+          System.out.println("Passive Authentication → " + (pa.isPass() ? "PASS" : "FAIL")));
+    }
+
+    static void printUsage() {
+      System.out.println("Usage: IssuerMain [options]");
+      System.out.println();
+      System.out.println("Key options:");
+      System.out.println("  -h, --help                 Show this help message");
+      System.out.println("  --job-json <path>          Load personalization job from JSON template");
+      System.out.println("  --doc-number <value>       Override MRZ document number");
+      System.out.println("  --enable-dg <n>            Ensure DG<n> is exported (repeatable)");
+      System.out.println("  --disable-dg <n>           Exclude DG<n> from the LDS (repeatable)");
+      System.out.println("  --corrupt-dg2              Emit a corrupted DG2 for negative tests");
+      System.out.println("  --pace-can/--pace-pin/--pace-puk <value>  Seed PACE credentials");
+      System.out.println("  --omit-secrets             Skip installing all issuer secrets");
+      System.out.println("  --omit-mrz-secret          Skip the MRZ BAC seed while keeping others");
+      System.out.println("  --omit-pace-secrets        Skip PACE CAN/PIN/PUK seeds");
+      System.out.println("  --open-read=<true|false>   Toggle EF.COM/EF.SOD open-read policy");
+      System.out.println("  --lifecycle <state>        Append lifecycle transition (PERSONALIZED/LOCKED)");
+      System.out.println("  --output <dir>             Override artifact directory (default target/issuer)");
+      System.out.println("  --face-preview[ -dir <dir>]  Export face preview JPEG from DG2");
+      System.out.println("  --validate                 Run Passive Authentication after issuance");
+      System.out.println();
+      System.out.println("Example:");
+      System.out.println("  mvn -q exec:java -Dexec.mainClass=emu.IssuerMain \\");
+      System.out.println("    -Dexec.args='--doc-number 123456789 --lifecycle PERSONALIZED --lifecycle LOCKED --open-read=true'");
     }
   }
 }
