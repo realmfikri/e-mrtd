@@ -206,6 +206,7 @@ The JUnit suite provisions a fresh in-memory card for every test and verifies:
 ### Manual Scenarios
 | Scenario | Command | Notes |
 |----------|---------|-------|
+| Issuer personalization CLI | ```bash mvn -q exec:java -Dexec.mainClass=emu.IssuerMain -Dexec.args='--doc-number=123456789 --date-of-birth=750101 --date-of-expiry=250101 --output target/issuer' ``` | Boots a simulator, writes EF.COM/DG1+artifacts, loads MRZ secrets, and exports binaries plus a manifest to `target/issuer`. |
 | Happy Path (Issuance + PA) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --require-pa' ``` | Demonstrates full workflow with successful passive authentication. |
 | Corrupted DG2 | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --require-pa --corrupt-dg2' ``` | Ensures metadata extractor and PA fail closed on tampered biometric data. |
 | Oversized DG2 | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --large-dg2' ``` | Validates large-file guardrails; DG2 parsing is skipped with a clear warning. |

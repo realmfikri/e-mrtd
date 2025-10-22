@@ -108,10 +108,6 @@ public final class SimRunner {
   private static final String DEFAULT_DOB = "750101";
   private static final String DEFAULT_DOE = "250101";
 
-  private static final byte KEY_REF_CAN = 0x02;
-  private static final byte KEY_REF_PIN = 0x03;
-  private static final byte KEY_REF_PUK = 0x04;
-
   private static final int PUT_DATA_P2_CURRENT_DATE = 0x67;
 
   private static final int AA_CHALLENGE_LENGTH = 8;
@@ -173,13 +169,13 @@ public final class SimRunner {
 
     // --- langkah penting: tanam kunci BAC di applet ---
     if (seed) {
-      byte[] mrzSeed = buildMrzSeed(doc, dob, doe);
+      byte[] mrzSeed = IssuerSecretEncoder.encodeMrzSeed(doc, dob, doe);
       int sw = putData(ch, 0x00, 0x62, mrzSeed, "PUT MRZ TLV");
       if (sw != 0x9000) {
         throw new RuntimeException(String.format(
             "SET BAC via PUT DATA gagal (SW=%04X). Cek format TLV.", sw));
       }
-      byte[] paceSecretsTlv = buildPaceSecretsTlv(can, pin, puk);
+      byte[] paceSecretsTlv = IssuerSecretEncoder.encodePaceSecrets(can, pin, puk);
       if (paceSecretsTlv != null) {
         sw = putData(ch, 0x00, 0x65, paceSecretsTlv, "PUT PACE secrets TLV");
         if (sw != 0x9000) {
@@ -551,6 +547,25 @@ public final class SimRunner {
     writeLength(out, keyBytes.length);
     out.write(keyBytes, 0, keyBytes.length);
     return out.toByteArray();
+  }
+
+  private static void writeTag(ByteArrayOutputStream out, int tag) {
+    if (tag > 0xFF) {
+      out.write((tag >> 8) & 0xFF);
+    }
+    out.write(tag & 0xFF);
+  }
+
+  private static void writeLength(ByteArrayOutputStream out, int length) {
+    if (length < 0x80) {
+      out.write(length);
+    } else {
+      int numBytes = (Integer.SIZE - Integer.numberOfLeadingZeros(length) + 7) / 8;
+      out.write(0x80 | numBytes);
+      for (int i = numBytes - 1; i >= 0; i--) {
+        out.write((length >> (8 * i)) & 0xFF);
+      }
+    }
   }
 
   private static byte[] stripLeadingZero(byte[] input) {
@@ -2126,84 +2141,6 @@ public final class SimRunner {
       return "PACE";
     }
     return "BAC";
-  }
-
-  private static byte[] buildMrzSeed(String doc, String dob, String doe) {
-    byte[] docBytes = doc.getBytes(StandardCharsets.US_ASCII);
-    byte[] dobBytes = dob.getBytes(StandardCharsets.US_ASCII);
-    byte[] doeBytes = doe.getBytes(StandardCharsets.US_ASCII);
-
-    ByteArrayOutputStream inner = new ByteArrayOutputStream();
-    writeTag(inner, 0x5F1F); // Document number
-    writeLength(inner, docBytes.length);
-    inner.write(docBytes, 0, docBytes.length);
-
-    writeTag(inner, 0x5F18); // Date of birth
-    writeLength(inner, dobBytes.length);
-    inner.write(dobBytes, 0, dobBytes.length);
-
-    writeTag(inner, 0x5F19); // Date of expiry
-    writeLength(inner, doeBytes.length);
-    inner.write(doeBytes, 0, doeBytes.length);
-
-    byte[] innerBytes = inner.toByteArray();
-    ByteArrayOutputStream outer = new ByteArrayOutputStream();
-    outer.write(0x62); // MRZ_TAG
-    writeLength(outer, innerBytes.length);
-    outer.write(innerBytes, 0, innerBytes.length);
-
-    return outer.toByteArray();
-  }
-
-  private static byte[] buildPaceSecretsTlv(String can, String pin, String puk) {
-    ByteArrayOutputStream entries = new ByteArrayOutputStream();
-    appendPaceSecretEntry(entries, KEY_REF_CAN, can);
-    appendPaceSecretEntry(entries, KEY_REF_PIN, pin);
-    appendPaceSecretEntry(entries, KEY_REF_PUK, puk);
-
-    byte[] entryBytes = entries.toByteArray();
-    if (entryBytes.length == 0) {
-      return null;
-    }
-
-    // PassportApplet expects the APDU body to be a sequence of 0x66 entries
-    // (with the key reference as the first byte of each value).  Do not wrap
-    // them in an extra 0x65 TLV, because P2 already encodes that container.
-    return entryBytes;
-  }
-
-  private static void appendPaceSecretEntry(ByteArrayOutputStream out, byte keyReference, String value) {
-    if (!hasText(value)) {
-      return;
-    }
-    byte[] valueBytes = value.getBytes(StandardCharsets.US_ASCII);
-    ByteArrayOutputStream entry = new ByteArrayOutputStream();
-    entry.write(keyReference);
-    entry.write(valueBytes, 0, valueBytes.length);
-    byte[] entryBytes = entry.toByteArray();
-    writeTag(out, 0x66);
-    writeLength(out, entryBytes.length);
-    out.write(entryBytes, 0, entryBytes.length);
-  }
-
-  private static void writeTag(ByteArrayOutputStream out, int tag) {
-    if (tag > 0xFF) {
-      out.write((tag >> 8) & 0xFF);
-    }
-    out.write(tag & 0xFF);
-  }
-
-  private static void writeLength(ByteArrayOutputStream out, int length) {
-    if (length < 0x80) {
-      out.write(length);
-    } else {
-      // simple long-form length support (not expected here but keeps it correct)
-      int numBytes = (Integer.SIZE - Integer.numberOfLeadingZeros(length) + 7) / 8;
-      out.write(0x80 | numBytes);
-      for (int i = numBytes - 1; i >= 0; i--) {
-        out.write((length >> (8 * i)) & 0xFF);
-      }
-    }
   }
 
   private static boolean hasText(String value) {

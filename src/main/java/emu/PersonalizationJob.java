@@ -238,8 +238,18 @@ public final class PersonalizationJob {
       return this;
     }
 
+    public Builder withFingerprintImagePath(Path path) {
+      this.fingerprintSource = BiometricSource.fromPath(BiometricType.FINGERPRINT, path);
+      return this;
+    }
+
     public Builder withIrisSyntheticSize(int width, int height) {
       this.irisSource = BiometricSource.synthetic(BiometricType.IRIS, width, height);
+      return this;
+    }
+
+    public Builder withIrisImagePath(Path path) {
+      this.irisSource = BiometricSource.fromPath(BiometricType.IRIS, path);
       return this;
     }
 
