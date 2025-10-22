@@ -220,6 +220,49 @@ The JUnit suite provisions a fresh in-memory card for every test and verifies:
 | TA Gating (no credentials) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace' ``` | Shows DG3/DG4 remain blocked (`SW=6985`) when no CVC/terminal key is supplied, even after PACE→CA. |
 | Terminal Authentication (DG3/DG4) | ```bash mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain && mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key' ``` | Performs PACE→CA→TA with the demo chain and reports DG3/DG4 accessibility. |
 
+### Issuer Simulator Quick Reference
+
+Inspect the issuer CLI switches with:
+
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.IssuerMain -Dexec.args='--help'
+```
+
+By default artifacts are exported to `target/issuer/` and include:
+
+- `manifest.json` listing lifecycle targets, hash algorithms, and relative paths for each generated file.
+- Individual LDS binaries (`EF.COM.bin`, `EF.DG1.bin`, …) alongside the signed `EF.SOD.bin`.
+- Trust anchors (`CSCA.cer`) and the document signer certificate (`DSC.cer`) ready for use with `PassiveAuthentication.verify`.
+- Optional DG2 preview images under `preview/` when `--face-preview` (or `--face-preview-dir`) is provided.
+
+Representative invocations:
+
+*Full LDS + lock with open reads + validation*
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.IssuerMain \
+  -Dexec.args='--doc-number 123456789 --lifecycle PERSONALIZED --lifecycle LOCKED --open-read=true --validate'
+```
+
+*Minimal DG1/DG2 export*
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.IssuerMain \
+  -Dexec.args='--disable-dg 3 --disable-dg 4 --disable-dg 14 --disable-dg 15 --lifecycle PERSONALIZED'
+```
+
+*EAC-ready issuance (PACE CAN + TA metadata + preview)*
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.IssuerMain \
+  -Dexec.args='--pace-can 123456 --include-ta --face-preview --lifecycle PERSONALIZED --lifecycle LOCKED'
+```
+
+*Negative DG2 corruption for PA failure drills*
+```bash
+mvn -q exec:java -Dexec.mainClass=emu.IssuerMain \
+  -Dexec.args='--corrupt-dg2 --lifecycle PERSONALIZED --validate'
+```
+
+Each run prints the absolute `target/issuer/manifest.json` location plus the exported trust-anchor paths so you can feed them directly into the passive-authentication verifier or compare them against the template in `docs/issuer-report-template.md`.
+
 ### Lifecycle State Controls
 
 - `ReadDG1Main` now seals the emulator at the end of personalization by issuing `PUT DATA 0xDE/0xAF` (PERSONALIZED) followed by `PUT DATA 0xDE/0xAD` (LOCKED). Look for the log entries `SET LIFECYCLE → PERSONALIZED → SW=9000` and `SET LIFECYCLE → LOCKED → SW=9000` to confirm the transition.
