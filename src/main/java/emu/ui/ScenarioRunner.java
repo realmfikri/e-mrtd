@@ -1,5 +1,7 @@
 package emu.ui;
 
+import emu.IssuerJobBuilder;
+import emu.IssuerSimulator;
 import emu.SessionReport;
 import emu.SimConfig;
 import emu.SimEvents;
@@ -29,6 +31,7 @@ import java.util.stream.Stream;
 final class ScenarioRunner {
 
   private static final String READ_MAIN_CLASS = "emu.ReadDG1Main";
+  private static final String ISSUER_MAIN_CLASS = "emu.IssuerMain";
   private static final String MISSING_TRUST_STORE_DIR = "target/ui-missing-trust";
   private static final String DEFAULT_DOC = "123456789";
   private static final String DEFAULT_DOB = "750101";
@@ -55,8 +58,6 @@ final class ScenarioRunner {
 
     boolean prepareMissingTrustStore = shouldPrepareMissingTrustStore(preset, advancedOptions);
 
-    List<String> advancedArgs = advancedOptions.toArgs();
-
     return new Task<>() {
       @Override
       protected ScenarioResult call() throws Exception {
@@ -74,19 +75,30 @@ final class ScenarioRunner {
         int exitCode = 0;
         String failedStep = null;
         SessionReport finalReport = null;
+        IssuerSimulator.Result finalIssuerResult = null;
 
         for (ScenarioStep step : preset.getSteps()) {
           if (isCancelled()) {
             break;
           }
 
-          List<String> command = buildCommand(step, advancedArgs, reportPath);
+          List<String> command = buildCommand(step, advancedOptions, reportPath);
           executedCommands.add(String.join(" ", command));
 
           if (READ_MAIN_CLASS.equals(step.getMainClass())) {
             try {
               SimConfig config = buildSimConfig(step, advancedOptions, reportPath);
               finalReport = runSimStep(step, config, listener);
+            } catch (Exception e) {
+              listener.onLog(SimLogCategory.GENERAL, step.getName(), "Error: " + e.getMessage());
+              exitCode = 1;
+              failedStep = step.getName();
+              break;
+            }
+          } else if (ISSUER_MAIN_CLASS.equals(step.getMainClass())) {
+            try {
+              IssuerSimulator.Result issuerResult = runIssuerStep(step, advancedOptions, listener);
+              finalIssuerResult = issuerResult;
             } catch (Exception e) {
               listener.onLog(SimLogCategory.GENERAL, step.getName(), "Error: " + e.getMessage());
               exitCode = 1;
@@ -103,12 +115,22 @@ final class ScenarioRunner {
         }
 
         boolean success = exitCode == 0 && !isCancelled();
-        return new ScenarioResult(success, exitCode, failedStep, executedCommands, reportPath, finalReport);
+        return new ScenarioResult(
+            success,
+            exitCode,
+            failedStep,
+            executedCommands,
+            reportPath,
+            finalReport,
+            finalIssuerResult);
       }
     };
   }
 
-  private List<String> buildCommand(ScenarioStep step, List<String> advancedArgs, Path reportPath) {
+  private List<String> buildCommand(
+      ScenarioStep step,
+      AdvancedOptionsSnapshot advancedOptions,
+      Path reportPath) {
     List<String> command = new ArrayList<>();
     command.add(javaExecutable);
     command.add("-cp");
@@ -118,9 +140,11 @@ final class ScenarioRunner {
     List<String> args = new ArrayList<>(step.getArgs());
     if (step.isProducesSessionReport()) {
       args.add("--out=" + reportPath.toString());
-      args.addAll(advancedArgs);
+      args.addAll(advancedOptions.toArgs());
     } else if (READ_MAIN_CLASS.equals(step.getMainClass())) {
-      args.addAll(advancedArgs);
+      args.addAll(advancedOptions.toArgs());
+    } else if (ISSUER_MAIN_CLASS.equals(step.getMainClass())) {
+      args.addAll(buildIssuerAdvancedArgs(advancedOptions));
     }
     command.addAll(args);
     return command;
@@ -161,6 +185,29 @@ final class ScenarioRunner {
     SessionReport report = simRunner.run(config, events);
     listener.onReport(report);
     return report;
+  }
+
+  private IssuerSimulator.Result runIssuerStep(
+      ScenarioStep step,
+      AdvancedOptionsSnapshot advancedOptions,
+      ScenarioExecutionListener listener) throws Exception {
+    List<String> args = new ArrayList<>(step.getArgs());
+    args.addAll(buildIssuerAdvancedArgs(advancedOptions));
+
+    IssuerJobBuilder builder = new IssuerJobBuilder();
+    builder.consumeArguments(args);
+
+    if (builder.isHelpRequested()) {
+      listener.onLog(SimLogCategory.GENERAL, step.getName(), "Help requested; skipping issuer run");
+      return null;
+    }
+
+    IssuerSimulator simulator = new IssuerSimulator();
+    listener.onLog(SimLogCategory.GENERAL, step.getName(), "Starting issuer personalization");
+    IssuerSimulator.Result result = simulator.run(builder.buildJob(), builder.buildSimulatorOptions());
+    builder.report(result, message -> listener.onLog(SimLogCategory.GENERAL, step.getName(), message));
+    listener.onLog(SimLogCategory.GENERAL, step.getName(), "Issuer personalization completed");
+    return result;
   }
 
   private int runProcessStep(ScenarioStep step, List<String> command, ScenarioExecutionListener listener)
@@ -276,6 +323,39 @@ final class ScenarioRunner {
       return LocalDate.of(fullYear, month, day);
     }
     return defaultDate;
+  }
+
+  private List<String> buildIssuerAdvancedArgs(AdvancedOptionsSnapshot options) {
+    List<String> args = new ArrayList<>();
+    if (hasText(options.getDocumentNumber())) {
+      args.add("--doc-number=" + options.getDocumentNumber());
+    }
+    if (hasText(options.getDateOfBirth())) {
+      args.add("--date-of-birth=" + options.getDateOfBirth());
+    }
+    if (hasText(options.getDateOfExpiry())) {
+      args.add("--date-of-expiry=" + options.getDateOfExpiry());
+    }
+    if (hasText(options.getCan())) {
+      args.add("--pace-can=" + options.getCan());
+    }
+    if (hasText(options.getPin())) {
+      args.add("--pace-pin=" + options.getPin());
+    }
+    if (hasText(options.getPuk())) {
+      args.add("--pace-puk=" + options.getPuk());
+    }
+    if (options.isOpenComSod()) {
+      args.add("--open-read=true");
+    }
+    if (options.isSecureComSod()) {
+      args.add("--open-read=false");
+    }
+    return args;
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
   }
 
   private static final class UiSimEvents implements SimEvents {

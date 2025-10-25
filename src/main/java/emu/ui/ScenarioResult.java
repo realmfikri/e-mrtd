@@ -1,9 +1,11 @@
 package emu.ui;
 
+import emu.IssuerSimulator;
 import emu.SessionReport;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 
 final class ScenarioResult {
 
@@ -13,6 +15,7 @@ final class ScenarioResult {
   private final List<String> commands;
   private final Path reportPath;
   private final SessionReport report;
+  private final IssuerSimulator.Result issuerResult;
 
   ScenarioResult(
       boolean success,
@@ -20,13 +23,15 @@ final class ScenarioResult {
       String failedStep,
       List<String> commands,
       Path reportPath,
-      SessionReport report) {
+      SessionReport report,
+      IssuerSimulator.Result issuerResult) {
     this.success = success;
     this.exitCode = exitCode;
     this.failedStep = failedStep;
     this.commands = List.copyOf(commands);
     this.reportPath = reportPath;
     this.report = report;
+    this.issuerResult = issuerResult;
   }
 
   boolean isSuccess() {
@@ -51,6 +56,10 @@ final class ScenarioResult {
 
   SessionReport getReport() {
     return report;
+  }
+
+  Optional<IssuerSimulator.Result> getIssuerResult() {
+    return Optional.ofNullable(issuerResult);
   }
 }
 
