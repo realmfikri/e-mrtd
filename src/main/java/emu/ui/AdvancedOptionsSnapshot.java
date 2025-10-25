@@ -148,6 +148,38 @@ final class AdvancedOptionsSnapshot {
     return trustStorePath;
   }
 
+  String getDocumentNumber() {
+    return documentNumber;
+  }
+
+  String getDateOfBirth() {
+    return dateOfBirth;
+  }
+
+  String getDateOfExpiry() {
+    return dateOfExpiry;
+  }
+
+  String getCan() {
+    return can;
+  }
+
+  String getPin() {
+    return pin;
+  }
+
+  String getPuk() {
+    return puk;
+  }
+
+  boolean isOpenComSod() {
+    return openComSod;
+  }
+
+  boolean isSecureComSod() {
+    return secureComSod;
+  }
+
   private static boolean hasText(String value) {
     return value != null && !value.isBlank();
   }

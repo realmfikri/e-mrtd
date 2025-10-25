@@ -1,5 +1,6 @@
 package emu.ui;
 
+import emu.IssuerSimulator;
 import emu.SessionReport;
 import emu.SimLogCategory;
 import emu.SimPhase;
@@ -91,6 +92,7 @@ public final class EmuSimulatorApp extends Application {
   private Task<ScenarioResult> currentTask;
   private List<String> lastCommands = List.of();
   private SessionReport lastReport;
+  private IssuerSimulator.Result lastIssuerResult;
   private SimPhase currentPhase = SimPhase.CONNECTING;
   private Path lastReportPath;
   private ScenarioResult lastScenarioResult;
@@ -324,6 +326,7 @@ public final class EmuSimulatorApp extends Application {
     clearDataGroups();
     resetStepper();
     lastReport = null;
+    lastIssuerResult = null;
     lastReportPath = null;
     copyCliButton.setDisable(true);
     copySessionInfoButton.setDisable(true);
@@ -511,6 +514,7 @@ public final class EmuSimulatorApp extends Application {
     lastCommands = result.getCommands();
     copyCliButton.setDisable(lastCommands.isEmpty());
     lastReportPath = result.getReportPath();
+    lastIssuerResult = result.getIssuerResult().orElse(null);
 
     if (!result.isSuccess()) {
       String failureMsg = "Scenario failed";
@@ -574,6 +578,7 @@ public final class EmuSimulatorApp extends Application {
     statusLabel.setText("Error running " + scenarioName + "); see log.");
     addLogEntry(SimLogCategory.GENERAL, "UI", throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
     copySessionInfoButton.setDisable(false);
+    lastIssuerResult = null;
     finishScenario();
   }
 
@@ -748,6 +753,32 @@ public final class EmuSimulatorApp extends Application {
     }
     sb.append(levelOne).append("DG3 readable: ").append(dg3ReadableValue.getText()).append(newline);
     sb.append(levelOne).append("DG4 readable: ").append(dg4ReadableValue.getText()).append(newline).append(newline);
+
+    if (lastIssuerResult != null) {
+      sb.append(baseIndent).append("Issuer Output").append(newline);
+      Path issuerOutput = lastIssuerResult.getOutputDirectory().toAbsolutePath();
+      sb.append(levelOne).append("Artifacts: ").append(issuerOutput).append(newline);
+      sb.append(levelOne)
+          .append("Manifest: ")
+          .append(lastIssuerResult.getManifestPath().toAbsolutePath())
+          .append(newline);
+      Path csca = issuerOutput.resolve("CSCA.cer");
+      if (Files.exists(csca)) {
+        sb.append(levelOne).append("CSCA anchor: ").append(csca.toAbsolutePath()).append(newline);
+      }
+      Path dsc = issuerOutput.resolve("DSC.cer");
+      if (Files.exists(dsc)) {
+        sb.append(levelOne).append("DSC cert: ").append(dsc.toAbsolutePath()).append(newline);
+      }
+      lastIssuerResult.getFacePreviewPath().ifPresent(path ->
+          sb.append(levelOne).append("Face preview: ").append(path.toAbsolutePath()).append(newline));
+      lastIssuerResult.getPassiveAuthenticationResult().ifPresent(pa ->
+          sb.append(levelOne)
+              .append("Passive Authentication: ")
+              .append(pa.isPass() ? "PASS" : "FAIL")
+              .append(newline));
+      sb.append(newline);
+    }
 
     sb.append(baseIndent).append("Technical Log").append(newline);
     if (logEntries.isEmpty()) {
