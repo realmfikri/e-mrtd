@@ -23,6 +23,8 @@ import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.BorderPane;
@@ -69,11 +71,25 @@ public final class EmuSimulatorApp extends Application {
   private final Button runAllButton = new Button("Run all tests");
   private final Label scenarioDescription = new Label("Select a scenario to see details.");
 
+  private TabPane resultTabs;
+  private Tab issuerTab;
   private final Label verdictValue = valueLabel();
   private final Label smModeValue = valueLabel();
   private final Label paceValue = valueLabel();
   private final Label caValue = valueLabel();
   private final Label aaValue = valueLabel();
+
+  private final Label issuerOutputDirectoryValue = multilineValueLabel();
+  private final Label issuerManifestValue = multilineValueLabel();
+  private final Label issuerLifecycleValue = multilineValueLabel();
+  private final Label issuerCscaValue = multilineValueLabel();
+  private final Label issuerDscValue = multilineValueLabel();
+  private final Label issuerPassiveAuthVerdictValue = valueLabel();
+  private final Label issuerPassiveAuthDigestValue = valueLabel();
+  private final Label issuerPassiveAuthDataGroupsValue = multilineValueLabel();
+  private final Label issuerPassiveAuthTrustIssuesValue = multilineValueLabel();
+  private final Label issuerFacePreviewPathValue = multilineValueLabel();
+  private final ImageView issuerFacePreviewImage = new ImageView();
 
   private final ListView<String> dgListView = new ListView<>();
   private final Label dg3ReadableValue = valueLabel();
@@ -185,12 +201,15 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private TabPane buildResultTabs() {
-    TabPane tabs = new TabPane();
-    tabs.getTabs().add(buildSummaryTab());
-    tabs.getTabs().add(buildDataGroupsTab());
-    tabs.getTabs().add(buildLogTab());
-    tabs.getTabs().add(buildSecurityTab());
-    return tabs;
+    resultTabs = new TabPane();
+    resultTabs.getTabs().add(buildSummaryTab());
+    issuerTab = buildIssuerTab();
+    resultTabs.getTabs().add(issuerTab);
+    clearIssuerTab();
+    resultTabs.getTabs().add(buildDataGroupsTab());
+    resultTabs.getTabs().add(buildLogTab());
+    resultTabs.getTabs().add(buildSecurityTab());
+    return resultTabs;
   }
 
   private Tab buildSummaryTab() {
@@ -207,6 +226,40 @@ public final class EmuSimulatorApp extends Application {
 
     Tab tab = new Tab("Summary", grid);
     tab.setClosable(false);
+    return tab;
+  }
+
+  private Tab buildIssuerTab() {
+    GridPane grid = new GridPane();
+    grid.setHgap(12);
+    grid.setVgap(12);
+    grid.setPadding(new Insets(16));
+
+    addSummaryRow(grid, 0, "Output directory", issuerOutputDirectoryValue);
+    addSummaryRow(grid, 1, "Manifest", issuerManifestValue);
+    addSummaryRow(grid, 2, "Lifecycle targets", issuerLifecycleValue);
+    addSummaryRow(grid, 3, "CSCA anchor", issuerCscaValue);
+    addSummaryRow(grid, 4, "DSC certificate", issuerDscValue);
+    addSummaryRow(grid, 5, "Passive Auth verdict", issuerPassiveAuthVerdictValue);
+    addSummaryRow(grid, 6, "Digest algorithm", issuerPassiveAuthDigestValue);
+    addSummaryRow(grid, 7, "Data group issues", issuerPassiveAuthDataGroupsValue);
+    addSummaryRow(grid, 8, "Trust store issues", issuerPassiveAuthTrustIssuesValue);
+    addSummaryRow(grid, 9, "Face preview", issuerFacePreviewPathValue);
+
+    issuerFacePreviewImage.setPreserveRatio(true);
+    issuerFacePreviewImage.setFitWidth(320);
+    issuerFacePreviewImage.setSmooth(true);
+
+    Label faceHeader = new Label("Face preview image");
+    VBox facePreviewBox = new VBox(6, faceHeader, issuerFacePreviewImage);
+    facePreviewBox.setPadding(new Insets(0, 0, 16, 0));
+    facePreviewBox.visibleProperty().bind(issuerFacePreviewImage.imageProperty().isNotNull());
+    facePreviewBox.managedProperty().bind(facePreviewBox.visibleProperty());
+
+    VBox container = new VBox(12, grid, facePreviewBox);
+    Tab tab = new Tab("Issuer Output", container);
+    tab.setClosable(false);
+    tab.setDisable(true);
     return tab;
   }
 
@@ -324,6 +377,7 @@ public final class EmuSimulatorApp extends Application {
     }
     clearSummary();
     clearDataGroups();
+    clearIssuerTab();
     resetStepper();
     lastReport = null;
     lastIssuerResult = null;
@@ -515,6 +569,7 @@ public final class EmuSimulatorApp extends Application {
     copyCliButton.setDisable(lastCommands.isEmpty());
     lastReportPath = result.getReportPath();
     lastIssuerResult = result.getIssuerResult().orElse(null);
+    updateIssuerTab(lastIssuerResult);
 
     if (!result.isSuccess()) {
       String failureMsg = "Scenario failed";
@@ -579,6 +634,7 @@ public final class EmuSimulatorApp extends Application {
     addLogEntry(SimLogCategory.GENERAL, "UI", throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
     copySessionInfoButton.setDisable(false);
     lastIssuerResult = null;
+    clearIssuerTab();
     finishScenario();
   }
 
@@ -733,6 +789,7 @@ public final class EmuSimulatorApp extends Application {
     String newline = System.lineSeparator();
     String baseIndent = indent == null ? "" : indent;
     String levelOne = baseIndent + "  ";
+    String levelTwo = levelOne + "  ";
 
     StringBuilder sb = new StringBuilder();
 
@@ -757,11 +814,22 @@ public final class EmuSimulatorApp extends Application {
     if (lastIssuerResult != null) {
       sb.append(baseIndent).append("Issuer Output").append(newline);
       Path issuerOutput = lastIssuerResult.getOutputDirectory().toAbsolutePath();
-      sb.append(levelOne).append("Artifacts: ").append(issuerOutput).append(newline);
+      sb.append(levelOne).append("Output directory: ").append(issuerOutput).append(newline);
+      Path manifestPath = lastIssuerResult.getManifestPath();
       sb.append(levelOne)
           .append("Manifest: ")
-          .append(lastIssuerResult.getManifestPath().toAbsolutePath())
+          .append(manifestPath != null ? manifestPath.toAbsolutePath() : "(not generated)")
           .append(newline);
+      sb.append(levelOne).append("Lifecycle targets:");
+      List<String> lifecycleTargets = lastIssuerResult.getJob().getLifecycleTargets();
+      if (lifecycleTargets == null || lifecycleTargets.isEmpty()) {
+        sb.append(' ').append("(none)").append(newline);
+      } else {
+        sb.append(newline);
+        for (String target : lifecycleTargets) {
+          sb.append(levelTwo).append(target).append(newline);
+        }
+      }
       Path csca = issuerOutput.resolve("CSCA.cer");
       if (Files.exists(csca)) {
         sb.append(levelOne).append("CSCA anchor: ").append(csca.toAbsolutePath()).append(newline);
@@ -770,13 +838,30 @@ public final class EmuSimulatorApp extends Application {
       if (Files.exists(dsc)) {
         sb.append(levelOne).append("DSC cert: ").append(dsc.toAbsolutePath()).append(newline);
       }
-      lastIssuerResult.getFacePreviewPath().ifPresent(path ->
-          sb.append(levelOne).append("Face preview: ").append(path.toAbsolutePath()).append(newline));
-      lastIssuerResult.getPassiveAuthenticationResult().ifPresent(pa ->
-          sb.append(levelOne)
-              .append("Passive Authentication: ")
-              .append(pa.isPass() ? "PASS" : "FAIL")
-              .append(newline));
+      lastIssuerResult.getPassiveAuthenticationResult().ifPresentOrElse(pa -> {
+        sb.append(levelOne).append("Passive Authentication verdict: ")
+            .append(pa.verdict()).append(newline);
+        sb.append(levelOne).append("Digest algorithm: ")
+            .append(orDefault(pa.getDigestAlgorithm())).append(newline);
+        sb.append(levelOne).append("Bad data groups: ")
+            .append(formatDataGroupList(pa.getBadDataGroups())).append(newline);
+        sb.append(levelOne).append("Missing data groups: ")
+            .append(formatDataGroupList(pa.getMissingDataGroups())).append(newline);
+        sb.append(levelOne).append("Locked data groups: ")
+            .append(formatDataGroupList(pa.getLockedDataGroups())).append(newline);
+        List<String> trustIssues = pa.getTrustStoreIssues();
+        if (trustIssues == null || trustIssues.isEmpty()) {
+          sb.append(levelOne).append("Trust store issues: (none)").append(newline);
+        } else {
+          sb.append(levelOne).append("Trust store issues:").append(newline);
+          for (String issue : trustIssues) {
+            sb.append(levelTwo).append(issue).append(newline);
+          }
+        }
+      }, () -> sb.append(levelOne).append("Passive Authentication verdict: (not run)").append(newline));
+      lastIssuerResult.getFacePreviewPath().ifPresentOrElse(path ->
+              sb.append(levelOne).append("Face preview: ").append(path.toAbsolutePath()).append(newline),
+          () -> sb.append(levelOne).append("Face preview: (not generated)").append(newline));
       sb.append(newline);
     }
 
@@ -865,6 +950,10 @@ public final class EmuSimulatorApp extends Application {
             StandardOpenOption.TRUNCATE_EXISTING);
       }
 
+      if (lastIssuerResult != null) {
+        copyIssuerArtifacts(lastIssuerResult, targetDir);
+      }
+
       statusLabel.setText("Exported session to " + targetDir.toAbsolutePath());
       addLogEntry(SimLogCategory.GENERAL, "UI", "Session exported to " + targetDir.toAbsolutePath());
     } catch (IOException e) {
@@ -907,12 +996,157 @@ public final class EmuSimulatorApp extends Application {
     return label;
   }
 
+  private static Label multilineValueLabel() {
+    Label label = valueLabel();
+    label.setWrapText(true);
+    label.setMaxWidth(Double.MAX_VALUE);
+    return label;
+  }
+
   private static String yesNo(boolean value) {
     return value ? "Yes" : "No";
   }
 
   private static String orDefault(String value) {
     return (value == null || value.isBlank()) ? "—" : value;
+  }
+
+  private void clearIssuerTab() {
+    issuerOutputDirectoryValue.setText("—");
+    issuerManifestValue.setText("(not generated)");
+    issuerLifecycleValue.setText("(none)");
+    issuerCscaValue.setText("(not exported)");
+    issuerDscValue.setText("(not exported)");
+    issuerPassiveAuthVerdictValue.setText("—");
+    issuerPassiveAuthDigestValue.setText("—");
+    issuerPassiveAuthDataGroupsValue.setText("Bad: (none)\nMissing: (none)\nLocked: (none)");
+    issuerPassiveAuthTrustIssuesValue.setText("(none)");
+    issuerFacePreviewPathValue.setText("(not generated)");
+    issuerFacePreviewImage.setImage(null);
+    if (issuerTab != null) {
+      issuerTab.setDisable(true);
+    }
+    if (resultTabs != null && issuerTab != null
+        && resultTabs.getSelectionModel().getSelectedItem() == issuerTab) {
+      resultTabs.getSelectionModel().selectFirst();
+    }
+  }
+
+  private void updateIssuerTab(IssuerSimulator.Result issuerResult) {
+    if (issuerResult == null) {
+      clearIssuerTab();
+      return;
+    }
+
+    issuerOutputDirectoryValue.setText(issuerResult.getOutputDirectory().toAbsolutePath().toString());
+    Path manifestPath = issuerResult.getManifestPath();
+    issuerManifestValue.setText(manifestPath != null
+        ? manifestPath.toAbsolutePath().toString()
+        : "(not generated)");
+    issuerLifecycleValue.setText(formatStringList(issuerResult.getJob().getLifecycleTargets()));
+
+    Path csca = issuerResult.getOutputDirectory().resolve("CSCA.cer");
+    issuerCscaValue.setText(Files.exists(csca) ? csca.toAbsolutePath().toString() : "(not exported)");
+
+    Path dsc = issuerResult.getOutputDirectory().resolve("DSC.cer");
+    issuerDscValue.setText(Files.exists(dsc) ? dsc.toAbsolutePath().toString() : "(not exported)");
+
+    issuerResult.getPassiveAuthenticationResult().ifPresentOrElse(pa -> {
+      issuerPassiveAuthVerdictValue.setText(pa.verdict());
+      issuerPassiveAuthDigestValue.setText(orDefault(pa.getDigestAlgorithm()));
+      issuerPassiveAuthDataGroupsValue.setText(String.format(
+          "Bad: %s\nMissing: %s\nLocked: %s",
+          formatDataGroupList(pa.getBadDataGroups()),
+          formatDataGroupList(pa.getMissingDataGroups()),
+          formatDataGroupList(pa.getLockedDataGroups())));
+      issuerPassiveAuthTrustIssuesValue.setText(formatStringList(pa.getTrustStoreIssues()));
+    }, () -> {
+      issuerPassiveAuthVerdictValue.setText("(not run)");
+      issuerPassiveAuthDigestValue.setText("—");
+      issuerPassiveAuthDataGroupsValue.setText("Bad: (none)\nMissing: (none)\nLocked: (none)");
+      issuerPassiveAuthTrustIssuesValue.setText("(none)");
+    });
+
+    issuerResult.getFacePreviewPath().ifPresentOrElse(path -> {
+      issuerFacePreviewPathValue.setText(path.toAbsolutePath().toString());
+      if (Files.exists(path)) {
+        try {
+          Image image = new Image(path.toUri().toString(), 320, 0, true, true);
+          if (!image.isError()) {
+            issuerFacePreviewImage.setImage(image);
+          } else {
+            issuerFacePreviewImage.setImage(null);
+            addLogEntry(
+                SimLogCategory.GENERAL,
+                "Issuer",
+                "Unable to load face preview image: " + image.getException());
+          }
+        } catch (Exception ex) {
+          issuerFacePreviewImage.setImage(null);
+          addLogEntry(SimLogCategory.GENERAL, "Issuer", "Unable to load face preview image: " + ex.getMessage());
+        }
+      } else {
+        issuerFacePreviewImage.setImage(null);
+      }
+    }, () -> {
+      issuerFacePreviewPathValue.setText("(not generated)");
+      issuerFacePreviewImage.setImage(null);
+    });
+
+    if (issuerTab != null) {
+      issuerTab.setDisable(false);
+    }
+    if (resultTabs != null && issuerTab != null) {
+      resultTabs.getSelectionModel().select(issuerTab);
+    }
+  }
+
+  private void copyIssuerArtifacts(IssuerSimulator.Result issuerResult, Path targetDir) throws IOException {
+    List<Path> sources = new ArrayList<>();
+    Path manifest = issuerResult.getManifestPath();
+    if (manifest != null && Files.exists(manifest)) {
+      sources.add(manifest);
+    }
+    Path csca = issuerResult.getOutputDirectory().resolve("CSCA.cer");
+    if (Files.exists(csca)) {
+      sources.add(csca);
+    }
+    Path dsc = issuerResult.getOutputDirectory().resolve("DSC.cer");
+    if (Files.exists(dsc)) {
+      sources.add(dsc);
+    }
+    if (sources.isEmpty()) {
+      return;
+    }
+    Path issuerDir = targetDir.resolve("issuer");
+    Files.createDirectories(issuerDir);
+    for (Path source : sources) {
+      Files.copy(source, issuerDir.resolve(source.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+    }
+  }
+
+  private static String formatStringList(List<String> values) {
+    if (values == null || values.isEmpty()) {
+      return "(none)";
+    }
+    return String.join(System.lineSeparator(), values);
+  }
+
+  private static String formatDataGroupList(List<Integer> dataGroups) {
+    if (dataGroups == null || dataGroups.isEmpty()) {
+      return "(none)";
+    }
+    List<String> formatted = new ArrayList<>();
+    for (Integer dg : dataGroups) {
+      if (dg == null) {
+        continue;
+      }
+      formatted.add("DG" + dg);
+    }
+    if (formatted.isEmpty()) {
+      return "(none)";
+    }
+    return String.join(", ", formatted);
   }
 
   private static final class BatchRunState {
