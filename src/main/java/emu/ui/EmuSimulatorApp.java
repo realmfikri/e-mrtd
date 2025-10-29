@@ -176,6 +176,8 @@ public final class EmuSimulatorApp extends Application {
 
     container.getChildren().addAll(header, runDoc9303Button, runAllButton, scrollPane, scenarioDescription, advancedOptionsPane);
     VBox.setVgrow(scrollPane, Priority.ALWAYS);
+    VBox.setVgrow(advancedOptionsPane, Priority.ALWAYS);
+    advancedOptionsPane.setMaxHeight(Double.MAX_VALUE);
 
     return container;
   }

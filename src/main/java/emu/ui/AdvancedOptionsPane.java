@@ -9,6 +9,7 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.DatePicker;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
@@ -94,7 +95,11 @@ final class AdvancedOptionsPane extends TitledPane {
     lifecyclePersonalizedBox.setSelected(DEFAULT_LIFECYCLE_TARGETS.contains("PERSONALIZED"));
     lifecycleLockedBox.setSelected(DEFAULT_LIFECYCLE_TARGETS.contains("LOCKED"));
 
-    setContent(content);
+    ScrollPane scrollPane = new ScrollPane(content);
+    scrollPane.setFitToWidth(true);
+    scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+
+    setContent(scrollPane);
   }
 
   AdvancedOptionsSnapshot snapshot() {
