@@ -166,6 +166,32 @@ class IssuerSimulatorIntegrationTest {
     assertTrue(manifest.containsKey("efCardAccess"), "EF.CardAccess path must be recorded in the manifest");
   }
 
+  @Test
+  void simRunnerCanReuseIssuerCardForBacRead() throws Exception {
+    MRZInfo mrz = createMrz("112233445");
+    PersonalizationJob job = PersonalizationJob.builder()
+        .withMrzInfo(mrz)
+        .enableDataGroup(14, false)
+        .enableDataGroup(15, false)
+        .lifecycleTargets(List.of("PERSONALIZED", "LOCKED"))
+        .build();
+
+    IssuerSimulator simulator = new IssuerSimulator();
+    IssuerSimulator.Result result = simulator.run(job, new IssuerSimulator.Options());
+
+    Path report = Files.createTempFile("sim-runner-reuse", ".json");
+    SimConfig config = new SimConfig.Builder()
+        .issuerResult(result)
+        .reportOutput(report)
+        .seed(false)
+        .build();
+
+    SimRunner runner = new SimRunner();
+    SessionReport sessionReport = runner.run(config, new SimEvents() {});
+    assertNotNull(sessionReport.dataGroups.getDg1Mrz(), "DG1 MRZ should be populated when reusing issuer card");
+    assertEquals(mrz.getDocumentNumber(), sessionReport.dataGroups.getDg1Mrz().documentNumber);
+  }
+
   private CardSession openSession(IssuerSimulator.Result result) throws Exception {
     TerminalCardService terminalService = new TerminalCardService(result.getTerminal());
     terminalService.open();
