@@ -1,6 +1,7 @@
 package emu.ui;
 
 import emu.IssuerSimulator;
+import emu.PersonalizationJob;
 import emu.SessionReport;
 import emu.SimLogCategory;
 import emu.SimPhase;
@@ -88,6 +89,7 @@ public final class EmuSimulatorApp extends Application {
   private final Label issuerPassiveAuthDigestValue = valueLabel();
   private final Label issuerPassiveAuthDataGroupsValue = multilineValueLabel();
   private final Label issuerPassiveAuthTrustIssuesValue = multilineValueLabel();
+  private final Label issuerFaceSourceValue = multilineValueLabel();
   private final Label issuerFacePreviewPathValue = multilineValueLabel();
   private final ImageView issuerFacePreviewImage = new ImageView();
 
@@ -244,7 +246,8 @@ public final class EmuSimulatorApp extends Application {
     addSummaryRow(grid, 6, "Digest algorithm", issuerPassiveAuthDigestValue);
     addSummaryRow(grid, 7, "Data group issues", issuerPassiveAuthDataGroupsValue);
     addSummaryRow(grid, 8, "Trust store issues", issuerPassiveAuthTrustIssuesValue);
-    addSummaryRow(grid, 9, "Face preview", issuerFacePreviewPathValue);
+    addSummaryRow(grid, 9, "Portrait source", issuerFaceSourceValue);
+    addSummaryRow(grid, 10, "Face preview", issuerFacePreviewPathValue);
 
     issuerFacePreviewImage.setPreserveRatio(true);
     issuerFacePreviewImage.setFitWidth(320);
@@ -1021,6 +1024,7 @@ public final class EmuSimulatorApp extends Application {
     issuerPassiveAuthDigestValue.setText("—");
     issuerPassiveAuthDataGroupsValue.setText("Bad: (none)\nMissing: (none)\nLocked: (none)");
     issuerPassiveAuthTrustIssuesValue.setText("(none)");
+    issuerFaceSourceValue.setText("(default synthetic)");
     issuerFacePreviewPathValue.setText("(not generated)");
     issuerFacePreviewImage.setImage(null);
     if (issuerTab != null) {
@@ -1066,6 +1070,20 @@ public final class EmuSimulatorApp extends Application {
       issuerPassiveAuthDataGroupsValue.setText("Bad: (none)\nMissing: (none)\nLocked: (none)");
       issuerPassiveAuthTrustIssuesValue.setText("(none)");
     });
+
+    PersonalizationJob.BiometricSource faceSource = issuerResult.getJob().getFaceSource();
+    if (faceSource != null) {
+      if (faceSource.getPath() != null) {
+        issuerFaceSourceValue.setText(faceSource.getPath().toAbsolutePath().toString());
+      } else if (faceSource.getWidth() != null && faceSource.getHeight() != null) {
+        issuerFaceSourceValue.setText(String.format(
+            "Synthetic %dx%d", faceSource.getWidth(), faceSource.getHeight()));
+      } else {
+        issuerFaceSourceValue.setText("(synthetic)");
+      }
+    } else {
+      issuerFaceSourceValue.setText("(default synthetic)");
+    }
 
     issuerResult.getFacePreviewPath().ifPresentOrElse(path -> {
       issuerFacePreviewPathValue.setText(path.toAbsolutePath().toString());

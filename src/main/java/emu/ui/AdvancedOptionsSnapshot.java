@@ -36,6 +36,9 @@ final class AdvancedOptionsSnapshot {
   private final String issuerSignatureAlgorithm;
   private final List<String> issuerLifecycleTargets;
   private final Boolean issuerOpenRead;
+  private final String issuerFacePath;
+  private final Integer issuerFaceWidth;
+  private final Integer issuerFaceHeight;
 
   AdvancedOptionsSnapshot(
       String documentType,
@@ -62,7 +65,10 @@ final class AdvancedOptionsSnapshot {
       String issuerDigestAlgorithm,
       String issuerSignatureAlgorithm,
       List<String> issuerLifecycleTargets,
-      Boolean issuerOpenRead) {
+      Boolean issuerOpenRead,
+      String issuerFacePath,
+      Integer issuerFaceWidth,
+      Integer issuerFaceHeight) {
     this.documentType = documentType;
     this.documentNumber = documentNumber;
     this.issuingState = issuingState;
@@ -88,6 +94,9 @@ final class AdvancedOptionsSnapshot {
     this.issuerSignatureAlgorithm = issuerSignatureAlgorithm;
     this.issuerLifecycleTargets = List.copyOf(issuerLifecycleTargets);
     this.issuerOpenRead = issuerOpenRead;
+    this.issuerFacePath = issuerFacePath;
+    this.issuerFaceWidth = issuerFaceWidth;
+    this.issuerFaceHeight = issuerFaceHeight;
   }
 
   List<String> toArgs() {
@@ -132,6 +141,12 @@ final class AdvancedOptionsSnapshot {
     }
     if (secureComSod) {
       args.add("--secure-com-sod");
+    }
+    if (hasText(issuerFacePath)) {
+      args.add("--face-path=" + issuerFacePath);
+    }
+    if (issuerFaceWidth != null && issuerFaceHeight != null) {
+      args.add("--face-size=" + issuerFaceWidth + "x" + issuerFaceHeight);
     }
     return args;
   }
@@ -262,6 +277,18 @@ final class AdvancedOptionsSnapshot {
 
   Boolean getIssuerOpenRead() {
     return issuerOpenRead;
+  }
+
+  String getIssuerFacePath() {
+    return issuerFacePath;
+  }
+
+  Integer getIssuerFaceWidth() {
+    return issuerFaceWidth;
+  }
+
+  Integer getIssuerFaceHeight() {
+    return issuerFaceHeight;
   }
 
   private static boolean hasText(String value) {
