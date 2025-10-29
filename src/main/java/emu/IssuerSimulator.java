@@ -152,33 +152,7 @@ public final class IssuerSimulator {
       }
     }
 
-    boolean canInstalled = includePaceSecrets && hasText(opts.paceCan);
-    boolean pinInstalled = includePaceSecrets && hasText(opts.pacePin);
-    boolean pukInstalled = includePaceSecrets && hasText(opts.pacePuk);
-
-    return new Result(
-        job,
-        artifacts,
-        outputDir,
-        manifestPath,
-        manifest,
-        simulator,
-        terminal,
-        facePreviewPath,
-        paResult,
-        includeMrzSecret,
-        canInstalled,
-        pinInstalled,
-        pukInstalled,
-        opts.paceCan,
-        opts.pacePin,
-        opts.pacePuk,
-        opts.openComSodReads,
-        opts.leavePersonalized);
-  }
-
-  private static boolean hasText(String value) {
-    return value != null && !value.isBlank();
+    return new Result(job, artifacts, outputDir, manifestPath, manifest, simulator, terminal, facePreviewPath, paResult);
   }
 
   private PassiveAuthentication.Result runValidation(CardTerminal terminal,
@@ -505,15 +479,6 @@ public final class IssuerSimulator {
     private final CardTerminal terminal;
     private final Path facePreviewPath;
     private final PassiveAuthentication.Result passiveAuthentication;
-    private final boolean mrzSeeded;
-    private final boolean paceCanInstalled;
-    private final boolean pacePinInstalled;
-    private final boolean pacePukInstalled;
-    private final String paceCan;
-    private final String pacePin;
-    private final String pacePuk;
-    private final Boolean openComSodReadsPolicy;
-    private final boolean leavePersonalized;
 
     Result(PersonalizationJob job,
            SODArtifacts artifacts,
@@ -523,16 +488,7 @@ public final class IssuerSimulator {
            CardSimulator simulator,
            CardTerminal terminal,
            Path facePreviewPath,
-           PassiveAuthentication.Result passiveAuthentication,
-           boolean mrzSeeded,
-           boolean paceCanInstalled,
-           boolean pacePinInstalled,
-           boolean pacePukInstalled,
-           String paceCan,
-           String pacePin,
-           String pacePuk,
-           Boolean openComSodReadsPolicy,
-           boolean leavePersonalized) {
+           PassiveAuthentication.Result passiveAuthentication) {
       this.job = job;
       this.artifacts = artifacts;
       this.outputDirectory = outputDirectory;
@@ -542,15 +498,6 @@ public final class IssuerSimulator {
       this.terminal = terminal;
       this.facePreviewPath = facePreviewPath;
       this.passiveAuthentication = passiveAuthentication;
-      this.mrzSeeded = mrzSeeded;
-      this.paceCanInstalled = paceCanInstalled;
-      this.pacePinInstalled = pacePinInstalled;
-      this.pacePukInstalled = pacePukInstalled;
-      this.paceCan = paceCan;
-      this.pacePin = pacePin;
-      this.pacePuk = pacePuk;
-      this.openComSodReadsPolicy = openComSodReadsPolicy;
-      this.leavePersonalized = leavePersonalized;
     }
 
     public PersonalizationJob getJob() {
@@ -587,42 +534,6 @@ public final class IssuerSimulator {
 
     CardSimulator getSimulator() {
       return simulator;
-    }
-
-    public boolean isMrzSeeded() {
-      return mrzSeeded;
-    }
-
-    public boolean isPaceCanInstalled() {
-      return paceCanInstalled;
-    }
-
-    public boolean isPacePinInstalled() {
-      return pacePinInstalled;
-    }
-
-    public boolean isPacePukInstalled() {
-      return pacePukInstalled;
-    }
-
-    public Optional<String> getPaceCan() {
-      return Optional.ofNullable(paceCan).filter(IssuerSimulator::hasText);
-    }
-
-    public Optional<String> getPacePin() {
-      return Optional.ofNullable(pacePin).filter(IssuerSimulator::hasText);
-    }
-
-    public Optional<String> getPacePuk() {
-      return Optional.ofNullable(pacePuk).filter(IssuerSimulator::hasText);
-    }
-
-    public Optional<Boolean> getOpenComSodReadsPolicy() {
-      return Optional.ofNullable(openComSodReadsPolicy);
-    }
-
-    public boolean isLeavePersonalized() {
-      return leavePersonalized;
     }
   }
 }
