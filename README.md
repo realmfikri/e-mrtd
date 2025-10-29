@@ -54,6 +54,15 @@ mvn -q -DskipTests clean package
 - `package` compiles sources, runs checks (tests skipped here), and assembles the application.
 
 ## 🚀 Run Scenarios
+
+### JavaFX UI Launcher
+Start the desktop UI with the JavaFX Maven plugin:
+
+```bash
+mvn javafx:run
+```
+
+> **Tip:** The plugin only exposes the `run` goal, so shorthand invocations such as `mvn javafx:r` fail with `MojoNotFoundException`.
 The main entry point is `emu.ReadDG1Main`, executing personalization + verification.
 
 > ℹ️ **Heads-up:** Run `mvn -q -DskipTests package` once after cloning or editing the project so the CLI classes are compiled

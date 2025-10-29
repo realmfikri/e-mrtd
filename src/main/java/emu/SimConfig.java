@@ -1,5 +1,7 @@
 package emu;
 
+import com.licel.jcardsim.smartcardio.CardSimulator;
+
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -31,6 +33,8 @@ public final class SimConfig {
   public final Path reportOutput;
   public final Path eventsOutput;
   public final Path facePreviewDirectory;
+  public final IssuerSimulator.Result issuerResult;
+  public final CardSimulator cardSimulator;
 
   private SimConfig(Builder builder) {
     this.seed = builder.seed;
@@ -56,6 +60,8 @@ public final class SimConfig {
     this.reportOutput = builder.reportOutput;
     this.eventsOutput = builder.eventsOutput;
     this.facePreviewDirectory = builder.facePreviewDirectory;
+    this.issuerResult = builder.issuerResult;
+    this.cardSimulator = builder.cardSimulator;
   }
 
   public Builder toBuilder() {
@@ -83,6 +89,8 @@ public final class SimConfig {
     builder.reportOutput = reportOutput;
     builder.eventsOutput = eventsOutput;
     builder.facePreviewDirectory = facePreviewDirectory;
+    builder.issuerResult = issuerResult;
+    builder.cardSimulator = cardSimulator;
     return builder;
   }
 
@@ -110,6 +118,8 @@ public final class SimConfig {
     Path reportOutput;
     Path eventsOutput;
     Path facePreviewDirectory;
+    IssuerSimulator.Result issuerResult;
+    CardSimulator cardSimulator;
 
     public Builder seed(boolean value) {
       this.seed = value;
@@ -232,6 +242,16 @@ public final class SimConfig {
 
     public Builder facePreviewDirectory(Path value) {
       this.facePreviewDirectory = value;
+      return this;
+    }
+
+    public Builder issuerResult(IssuerSimulator.Result value) {
+      this.issuerResult = value;
+      return this;
+    }
+
+    public Builder cardSimulator(CardSimulator value) {
+      this.cardSimulator = value;
       return this;
     }
 
