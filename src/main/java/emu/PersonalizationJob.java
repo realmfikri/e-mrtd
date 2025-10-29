@@ -65,6 +65,22 @@ public final class PersonalizationJob {
     return new Builder();
   }
 
+  public static Set<Integer> defaultEnabledDataGroups() {
+    return Builder.defaultDataGroups();
+  }
+
+  public static String defaultDigestAlgorithm() {
+    return Builder.DEFAULT_DIGEST_ALGORITHM;
+  }
+
+  public static String defaultSignatureAlgorithm() {
+    return Builder.DEFAULT_SIGNATURE_ALGORITHM;
+  }
+
+  public static List<String> defaultLifecycleTargets() {
+    return Builder.DEFAULT_LIFECYCLE_TARGETS;
+  }
+
   public MRZInfo getMrzInfo() {
     return mrzInfo;
   }
@@ -165,14 +181,19 @@ public final class PersonalizationJob {
   }
 
   public static final class Builder {
+    private static final Set<Integer> DEFAULT_DATA_GROUPS = Set.of(2, 3, 4, 14, 15);
+    private static final String DEFAULT_DIGEST_ALGORITHM = "SHA-256";
+    private static final String DEFAULT_SIGNATURE_ALGORITHM = "SHA256withRSA";
+    private static final List<String> DEFAULT_LIFECYCLE_TARGETS = List.of("SIMULATOR");
+
     private MRZInfo mrzInfo;
     private final Set<Integer> enabledDataGroups = new HashSet<>();
     private boolean corruptDg2;
     private BiometricSource faceSource = BiometricSource.synthetic(BiometricType.FACE, 480, 600);
     private BiometricSource fingerprintSource = BiometricSource.synthetic(BiometricType.FINGERPRINT, 160, 160);
     private BiometricSource irisSource = BiometricSource.synthetic(BiometricType.IRIS, 160, 160);
-    private String digestAlgorithm = "SHA-256";
-    private String signatureAlgorithm = "SHA256withRSA";
+    private String digestAlgorithm = DEFAULT_DIGEST_ALGORITHM;
+    private String signatureAlgorithm = DEFAULT_SIGNATURE_ALGORITHM;
     private List<String> paceOids = defaultPaceOids();
     private boolean includeCardAccess = true;
     private boolean includeTerminalAuthentication = true;
@@ -182,7 +203,7 @@ public final class PersonalizationJob {
     private int cscaKeySize = 2048;
     private BigInteger chipAuthenticationKeyId = BigInteger.ONE;
     private Long deterministicSeed;
-    private List<String> lifecycleTargets = List.of("SIMULATOR");
+    private List<String> lifecycleTargets = new ArrayList<>(DEFAULT_LIFECYCLE_TARGETS);
 
     private static List<String> defaultPaceOids() {
       List<String> defaults = new ArrayList<>();
@@ -194,11 +215,11 @@ public final class PersonalizationJob {
     }
 
     private Builder() {
-      enabledDataGroups.add(2);
-      enabledDataGroups.add(3);
-      enabledDataGroups.add(4);
-      enabledDataGroups.add(14);
-      enabledDataGroups.add(15);
+      enabledDataGroups.addAll(DEFAULT_DATA_GROUPS);
+    }
+
+    private static Set<Integer> defaultDataGroups() {
+      return DEFAULT_DATA_GROUPS;
     }
 
     public Builder withMrzInfo(MRZInfo mrzInfo) {

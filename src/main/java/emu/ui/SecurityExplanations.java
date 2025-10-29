@@ -41,6 +41,55 @@ final class SecurityExplanations {
             "Notes:",
             "- Biometrics (DG3/DG4) remain access‑controlled; no Terminal Authentication in this preset."));
 
+    // Issuer: Full LDS
+    BY_NAME.put(
+        "Issuer: Full LDS",
+        String.join("\n",
+            "What this demonstrates:",
+            "- In-process issuer personalisation of the default LDS set (DG1/DG2/DG3/DG4/DG14/DG15) followed by a secure read.",
+            "ICAO Doc 9303 alignment:",
+            "- Mirrors a production issuance flow with digest/signature defaults (" + emu.PersonalizationJob.defaultDigestAlgorithm()
+                + " + " + emu.PersonalizationJob.defaultSignatureAlgorithm() + ") and PA validation.",
+            "Security properties:",
+            "- Exports CSCA/DS certificates, EF.SOD, and biometric groups that can be validated by Passive Authentication.",
+            "Exported artefacts:",
+            "- target/ui-issuer/full/manifest.json summarises lifecycle targets, algorithms, and file hashes.",
+            "- Individual EF.COM/DG*.bin payloads plus EF.SOD.bin and trust anchors ready for reader integration.",
+            "Notes:",
+            "- The follow-up read exercises PACE→PA against the freshly written artifacts."));
+
+    // Issuer: Minimal DG1/DG2
+    BY_NAME.put(
+        "Issuer: Minimal DG1/DG2",
+        String.join("\n",
+            "What this demonstrates:",
+            "- Issuance constrained to EF.COM, EF.DG1, EF.DG2, and EF.SOD for lightweight deployments before a BAC read.",
+            "ICAO Doc 9303 alignment:",
+            "- Shows that PA still succeeds when optional biometrics (DG3/DG4) and EAC metadata (DG14/DG15) are omitted.",
+            "Security properties:",
+            "- Maintains LDS integrity/signature coverage while minimising data exposure.",
+            "Exported artefacts:",
+            "- target/ui-issuer/minimal/manifest.json documents the pruned DG list and lifecycle (PERSONALIZED).",
+            "- Only EF.COM.bin, EF.DG1.bin, EF.DG2.bin, and EF.SOD.bin are generated alongside the trust anchors.",
+            "Notes:",
+            "- Reader falls back to BAC because DG14 is absent; PA still verifies EF.SOD hashes."));
+
+    // Issuer: Corrupt DG2
+    BY_NAME.put(
+        "Issuer: Corrupt DG2",
+        String.join("\n",
+            "What this demonstrates:",
+            "- A negative issuance where DG2 is intentionally corrupted to trigger PA failures immediately after export.",
+            "ICAO Doc 9303 alignment:",
+            "- Highlights reliance on EF.SOD digests during PA to reject tampered biometric data.",
+            "Security properties:",
+            "- Integrity breach detection: PA fails closed and the simulator’s own validation reports the mismatch.",
+            "Exported artefacts:",
+            "- target/ui-issuer/corrupt/manifest.json and EF.DG2.bin flag the corrupted hash for forensic review.",
+            "- EF.SOD.bin contains digests that no longer match DG2, demonstrating failure evidence for auditors.",
+            "Notes:",
+            "- Use the follow-up read’s PA error to brief teams on tamper handling and evidence capture."));
+
     // BAC Only (no PACE)
     BY_NAME.put(
         "BAC Only (no PACE)",

@@ -345,11 +345,26 @@ final class ScenarioRunner {
     if (hasText(options.getPuk())) {
       args.add("--pace-puk=" + options.getPuk());
     }
-    if (options.isOpenComSod()) {
-      args.add("--open-read=true");
+    for (Integer dg : options.getIssuerEnableDataGroups()) {
+      args.add("--enable-dg=" + dg);
     }
-    if (options.isSecureComSod()) {
-      args.add("--open-read=false");
+    for (Integer dg : options.getIssuerDisableDataGroups()) {
+      args.add("--disable-dg=" + dg);
+    }
+    if (hasText(options.getIssuerDigestAlgorithm())) {
+      args.add("--digest=" + options.getIssuerDigestAlgorithm());
+    }
+    if (hasText(options.getIssuerSignatureAlgorithm())) {
+      args.add("--signature=" + options.getIssuerSignatureAlgorithm());
+    }
+    for (String lifecycle : options.getIssuerLifecycleTargets()) {
+      if (hasText(lifecycle)) {
+        args.add("--lifecycle=" + lifecycle);
+      }
+    }
+    Boolean openRead = options.getIssuerOpenRead();
+    if (openRead != null) {
+      args.add("--open-read=" + openRead);
     }
     return args;
   }

@@ -8,6 +8,7 @@ import java.util.List;
 final class ScenarioPresets {
 
   private static final String READ_MAIN = "emu.ReadDG1Main";
+  private static final String ISSUER_MAIN = "emu.IssuerMain";
   private static final String GENERATE_TA = "emu.GenerateDemoTaChainMain";
 
   private ScenarioPresets() {
@@ -19,6 +20,33 @@ final class ScenarioPresets {
             "Happy Path (Issuance + PA)",
             "Seeds the passport, establishes secure messaging, and requires Passive Authentication.",
             readStep("Run ReadDG1Main", "--seed", "--require-pa")),
+        scenario(
+            "Issuer: Full LDS",
+            "Personalises a full LDS with validation enabled, then exercises a secure read.",
+            issuerAndRead(
+                "Personalise full LDS",
+                List.of("--output=target/ui-issuer/full", "--validate"),
+                List.of("--seed", "--attempt-pace", "--require-pa"))),
+        scenario(
+            "Issuer: Minimal DG1/DG2",
+            "Emits only DG1/DG2 alongside EF.SOD to highlight minimal exports before a BAC read.",
+            issuerAndRead(
+                "Personalise minimal LDS",
+                List.of(
+                    "--output=target/ui-issuer/minimal",
+                    "--disable-dg=3",
+                    "--disable-dg=4",
+                    "--disable-dg=14",
+                    "--disable-dg=15",
+                    "--lifecycle=PERSONALIZED"),
+                List.of("--seed", "--require-pa"))),
+        scenario(
+            "Issuer: Corrupt DG2",
+            "Produces a tampered DG2 for PA-negative testing and immediately performs a failing read.",
+            issuerAndRead(
+                "Personalise with corrupted DG2",
+                List.of("--output=target/ui-issuer/corrupt", "--corrupt-dg2", "--validate"),
+                List.of("--seed", "--attempt-pace", "--require-pa"))),
         scenario(
             "BAC Only (no PACE)",
             "Demonstrates fallback to BAC secure messaging without attempting PACE.",
@@ -141,6 +169,16 @@ final class ScenarioPresets {
     generatorStepArgs.addAll(generatorExtraArgs);
     steps.add(new ScenarioStep("Generate TA chain", GENERATE_TA, generatorStepArgs, false));
     steps.add(new ScenarioStep("Run ReadDG1Main", READ_MAIN, readArgs, true));
+    return List.copyOf(steps);
+  }
+
+  private static List<ScenarioStep> issuerAndRead(
+      String issuerStepName, List<String> issuerArgs, List<String> readArgs) {
+    List<ScenarioStep> steps = new ArrayList<>();
+    steps.add(new ScenarioStep(issuerStepName, ISSUER_MAIN, issuerArgs, false));
+    if (!readArgs.isEmpty()) {
+      steps.add(new ScenarioStep("Run ReadDG1Main", READ_MAIN, readArgs, true));
+    }
     return List.copyOf(steps);
   }
 }

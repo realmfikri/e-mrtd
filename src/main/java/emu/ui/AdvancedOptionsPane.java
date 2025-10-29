@@ -1,5 +1,7 @@
 package emu.ui;
 
+import emu.PersonalizationJob;
+
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
@@ -18,6 +20,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -26,6 +29,8 @@ import java.util.stream.Collectors;
 final class AdvancedOptionsPane extends TitledPane {
 
   private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+  private static final Set<Integer> DEFAULT_ISSUER_DATA_GROUPS = PersonalizationJob.defaultEnabledDataGroups();
+  private static final List<String> DEFAULT_LIFECYCLE_TARGETS = PersonalizationJob.defaultLifecycleTargets();
 
   private final TextField docNumberField = new TextField();
   private final TextField dobField = new TextField();
@@ -47,6 +52,14 @@ final class AdvancedOptionsPane extends TitledPane {
   private final CheckBox openComSodBox = new CheckBox("Open COM/SOD");
   private final CheckBox secureComSodBox = new CheckBox("Secure COM/SOD");
 
+  private final List<DataGroupToggle> issuerDataGroupToggles = createDataGroupToggles();
+  private final ComboBox<AlgorithmOption> digestAlgorithmBox = new ComboBox<>();
+  private final ComboBox<AlgorithmOption> signatureAlgorithmBox = new ComboBox<>();
+  private final ComboBox<OpenReadChoice> openReadPolicyBox = new ComboBox<>();
+  private final CheckBox lifecycleSimulatorBox = new CheckBox("SIMULATOR");
+  private final CheckBox lifecyclePersonalizedBox = new CheckBox("PERSONALIZED");
+  private final CheckBox lifecycleLockedBox = new CheckBox("LOCKED");
+
   AdvancedOptionsPane() {
     setText("Advanced toggles");
     setCollapsible(true);
@@ -58,8 +71,13 @@ final class AdvancedOptionsPane extends TitledPane {
     content.getChildren().add(buildMrzSection());
     content.getChildren().add(buildPaceSection());
     content.getChildren().add(buildPaceProfileSection());
+    content.getChildren().add(buildIssuerSection());
     content.getChildren().add(buildTerminalAuthSection());
     content.getChildren().add(buildPolicySection());
+
+    lifecycleSimulatorBox.setSelected(DEFAULT_LIFECYCLE_TARGETS.contains("SIMULATOR"));
+    lifecyclePersonalizedBox.setSelected(DEFAULT_LIFECYCLE_TARGETS.contains("PERSONALIZED"));
+    lifecycleLockedBox.setSelected(DEFAULT_LIFECYCLE_TARGETS.contains("LOCKED"));
 
     setContent(content);
   }
@@ -70,6 +88,16 @@ final class AdvancedOptionsPane extends TitledPane {
       taDateValue = DATE_FORMATTER.format(taDatePicker.getValue());
     } else if (!taDateOverrideField.getText().isBlank()) {
       taDateValue = taDateOverrideField.getText().trim();
+    }
+
+    List<Integer> issuerEnable = new ArrayList<>();
+    List<Integer> issuerDisable = new ArrayList<>();
+    for (DataGroupToggle toggle : issuerDataGroupToggles) {
+      if (toggle.checkBox.isSelected() && !toggle.defaultSelected) {
+        issuerEnable.add(toggle.dataGroup);
+      } else if (!toggle.checkBox.isSelected() && toggle.defaultSelected) {
+        issuerDisable.add(toggle.dataGroup);
+      }
     }
 
     return new AdvancedOptionsSnapshot(
@@ -85,7 +113,13 @@ final class AdvancedOptionsPane extends TitledPane {
         taDateValue,
         trimmed(trustStoreField.getText()),
         openComSodBox.isSelected(),
-        secureComSodBox.isSelected());
+        secureComSodBox.isSelected(),
+        issuerEnable,
+        issuerDisable,
+        algorithmValue(digestAlgorithmBox),
+        algorithmValue(signatureAlgorithmBox),
+        selectedLifecycleTargets(),
+        openReadSelection());
   }
 
   private Node buildMrzSection() {
@@ -135,6 +169,50 @@ final class AdvancedOptionsPane extends TitledPane {
     Label title = new Label("PACE profile preference");
     title.getStyleClass().add("section-title");
     box.getChildren().addAll(title, pacePreferenceBox);
+    return box;
+  }
+
+  private Node buildIssuerSection() {
+    VBox box = new VBox(6);
+    Label title = new Label("Issuer personalization");
+    title.getStyleClass().add("section-title");
+
+    Label dataGroupLabel = new Label("Data group inclusion");
+    GridPane dgGrid = new GridPane();
+    dgGrid.setHgap(8);
+    dgGrid.setVgap(6);
+    for (int i = 0; i < issuerDataGroupToggles.size(); i++) {
+      DataGroupToggle toggle = issuerDataGroupToggles.get(i);
+      GridPane.setRowIndex(toggle.checkBox, i / 4);
+      GridPane.setColumnIndex(toggle.checkBox, i % 4);
+      dgGrid.getChildren().add(toggle.checkBox);
+    }
+
+    configureAlgorithmBox(digestAlgorithmBox, PersonalizationJob.defaultDigestAlgorithm());
+    configureAlgorithmBox(signatureAlgorithmBox, PersonalizationJob.defaultSignatureAlgorithm());
+
+    GridPane algorithmGrid = new GridPane();
+    algorithmGrid.setHgap(8);
+    algorithmGrid.setVgap(6);
+    addRow(algorithmGrid, 0, new Label("Digest"), digestAlgorithmBox);
+    addRow(algorithmGrid, 1, new Label("Signature"), signatureAlgorithmBox);
+
+    HBox lifecycleBox = new HBox(8);
+    lifecycleBox.getChildren().addAll(lifecycleSimulatorBox, lifecyclePersonalizedBox, lifecycleLockedBox);
+
+    openReadPolicyBox.getItems().setAll(OpenReadChoice.values());
+    openReadPolicyBox.getSelectionModel().select(OpenReadChoice.DEFAULT);
+
+    box.getChildren().addAll(
+        title,
+        dataGroupLabel,
+        dgGrid,
+        new Label("Algorithms"),
+        algorithmGrid,
+        new Label("Lifecycle targets"),
+        lifecycleBox,
+        new Label("Open COM/SOD read policy"),
+        openReadPolicyBox);
     return box;
   }
 
@@ -199,6 +277,55 @@ final class AdvancedOptionsPane extends TitledPane {
     return selection;
   }
 
+  private List<DataGroupToggle> createDataGroupToggles() {
+    List<DataGroupToggle> toggles = new ArrayList<>();
+    for (int dg = 2; dg <= 16; dg++) {
+      CheckBox box = new CheckBox("DG" + dg);
+      boolean selected = DEFAULT_ISSUER_DATA_GROUPS.contains(dg);
+      box.setSelected(selected);
+      toggles.add(new DataGroupToggle(dg, box, selected));
+    }
+    return toggles;
+  }
+
+  private void configureAlgorithmBox(ComboBox<AlgorithmOption> box, String defaultValue) {
+    box.getItems().setAll(
+        new AlgorithmOption("Default (" + defaultValue + ")", null),
+        new AlgorithmOption("SHA-256", "SHA-256"),
+        new AlgorithmOption("SHA-384", "SHA-384"),
+        new AlgorithmOption("SHA-512", "SHA-512"),
+        new AlgorithmOption("SHA1", "SHA1"));
+    box.setEditable(false);
+    box.getSelectionModel().selectFirst();
+  }
+
+  private static String algorithmValue(ComboBox<AlgorithmOption> box) {
+    AlgorithmOption option = box.getSelectionModel().getSelectedItem();
+    return option == null ? null : option.value;
+  }
+
+  private List<String> selectedLifecycleTargets() {
+    List<String> values = new ArrayList<>();
+    if (lifecycleSimulatorBox.isSelected()) {
+      values.add("SIMULATOR");
+    }
+    if (lifecyclePersonalizedBox.isSelected()) {
+      values.add("PERSONALIZED");
+    }
+    if (lifecycleLockedBox.isSelected()) {
+      values.add("LOCKED");
+    }
+    return values;
+  }
+
+  private Boolean openReadSelection() {
+    OpenReadChoice choice = openReadPolicyBox.getSelectionModel().getSelectedItem();
+    if (choice == null) {
+      return null;
+    }
+    return choice.value;
+  }
+
   private static List<String> parseMultiLine(String value) {
     if (value == null || value.isBlank()) {
       return List.of();
@@ -215,5 +342,50 @@ final class AdvancedOptionsPane extends TitledPane {
     }
     return List.copyOf(tokens);
   }
-}
 
+  private static final class DataGroupToggle {
+    private final int dataGroup;
+    private final CheckBox checkBox;
+    private final boolean defaultSelected;
+
+    private DataGroupToggle(int dataGroup, CheckBox checkBox, boolean defaultSelected) {
+      this.dataGroup = dataGroup;
+      this.checkBox = checkBox;
+      this.defaultSelected = defaultSelected;
+    }
+  }
+
+  private static final class AlgorithmOption {
+    private final String label;
+    private final String value;
+
+    private AlgorithmOption(String label, String value) {
+      this.label = label;
+      this.value = value;
+    }
+
+    @Override
+    public String toString() {
+      return label;
+    }
+  }
+
+  private enum OpenReadChoice {
+    DEFAULT(null, "Default (CLI behaviour)"),
+    OPEN(Boolean.TRUE, "Open (true)"),
+    SECURE(Boolean.FALSE, "Secure (false)");
+
+    private final Boolean value;
+    private final String label;
+
+    OpenReadChoice(Boolean value, String label) {
+      this.value = value;
+      this.label = label;
+    }
+
+    @Override
+    public String toString() {
+      return label;
+    }
+  }
+}
