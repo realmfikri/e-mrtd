@@ -24,6 +24,12 @@ final class AdvancedOptionsSnapshot {
   private final String trustStorePath;
   private final boolean openComSod;
   private final boolean secureComSod;
+  private final List<Integer> issuerEnableDataGroups;
+  private final List<Integer> issuerDisableDataGroups;
+  private final String issuerDigestAlgorithm;
+  private final String issuerSignatureAlgorithm;
+  private final List<String> issuerLifecycleTargets;
+  private final Boolean issuerOpenRead;
 
   AdvancedOptionsSnapshot(
       String documentNumber,
@@ -38,7 +44,13 @@ final class AdvancedOptionsSnapshot {
       String taDate,
       String trustStorePath,
       boolean openComSod,
-      boolean secureComSod) {
+      boolean secureComSod,
+      List<Integer> issuerEnableDataGroups,
+      List<Integer> issuerDisableDataGroups,
+      String issuerDigestAlgorithm,
+      String issuerSignatureAlgorithm,
+      List<String> issuerLifecycleTargets,
+      Boolean issuerOpenRead) {
     this.documentNumber = documentNumber;
     this.dateOfBirth = dateOfBirth;
     this.dateOfExpiry = dateOfExpiry;
@@ -52,6 +64,12 @@ final class AdvancedOptionsSnapshot {
     this.trustStorePath = trustStorePath;
     this.openComSod = openComSod;
     this.secureComSod = secureComSod;
+    this.issuerEnableDataGroups = List.copyOf(issuerEnableDataGroups);
+    this.issuerDisableDataGroups = List.copyOf(issuerDisableDataGroups);
+    this.issuerDigestAlgorithm = issuerDigestAlgorithm;
+    this.issuerSignatureAlgorithm = issuerSignatureAlgorithm;
+    this.issuerLifecycleTargets = List.copyOf(issuerLifecycleTargets);
+    this.issuerOpenRead = issuerOpenRead;
   }
 
   List<String> toArgs() {
@@ -178,6 +196,30 @@ final class AdvancedOptionsSnapshot {
 
   boolean isSecureComSod() {
     return secureComSod;
+  }
+
+  List<Integer> getIssuerEnableDataGroups() {
+    return issuerEnableDataGroups;
+  }
+
+  List<Integer> getIssuerDisableDataGroups() {
+    return issuerDisableDataGroups;
+  }
+
+  String getIssuerDigestAlgorithm() {
+    return issuerDigestAlgorithm;
+  }
+
+  String getIssuerSignatureAlgorithm() {
+    return issuerSignatureAlgorithm;
+  }
+
+  List<String> getIssuerLifecycleTargets() {
+    return issuerLifecycleTargets;
+  }
+
+  Boolean getIssuerOpenRead() {
+    return issuerOpenRead;
   }
 
   private static boolean hasText(String value) {

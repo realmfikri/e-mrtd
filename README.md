@@ -220,6 +220,14 @@ The JUnit suite provisions a fresh in-memory card for every test and verifies:
 | TA Gating (no credentials) | ```bash mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace' ``` | Shows DG3/DG4 remain blocked (`SW=6985`) when no CVC/terminal key is supplied, even after PACE→CA. |
 | Terminal Authentication (DG3/DG4) | ```bash mvn -q exec:java -Dexec.mainClass=emu.GenerateDemoTaChainMain && mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --attempt-pace --ta-cvc target/ta-demo/cvca.cvc --ta-cvc target/ta-demo/terminal.cvc --ta-key target/ta-demo/terminal.key' ``` | Performs PACE→CA→TA with the demo chain and reports DG3/DG4 accessibility. |
 
+### UI Issuer Presets
+
+The desktop runner now surfaces issuer-focused presets that drive the in-process `IssuerMain` helper before chaining into familiar read scenarios:
+
+- **Issuer: Full LDS** – seeds the emulator with the default DG set (DG1/DG2/DG3/DG4/DG14/DG15), exports `manifest.json`, EF binaries, and trust anchors to `target/ui-issuer/full/`, then performs a PACE→PA read to confirm integrity.
+- **Issuer: Minimal DG1/DG2** – disables DG3/DG4/DG14/DG15 to showcase a lean LDS; the manifest and `EF.COM.bin`/`EF.DG1.bin`/`EF.DG2.bin`/`EF.SOD.bin` land in `target/ui-issuer/minimal/` before a BAC/PA read validates the reduced dataset.
+- **Issuer: Corrupt DG2** – produces a tampered DG2 alongside `manifest.json` in `target/ui-issuer/corrupt/` so the follow-up read demonstrates PA failure reporting and artifact capture for negative drills.
+
 ### Issuer Simulator Quick Reference
 
 Inspect the issuer CLI switches with:

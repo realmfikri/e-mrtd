@@ -28,6 +28,14 @@ public final class IssuerMain {
     System.out.println("  --enable-dg <n>            Ensure DG<n> is exported (repeatable)");
     System.out.println("  --disable-dg <n>           Exclude DG<n> from the LDS (repeatable)");
     System.out.println("  --corrupt-dg2              Emit a corrupted DG2 for negative tests");
+    System.out.println(
+        "  --digest <alg>             Override EF.SOD digest algorithm (default "
+            + PersonalizationJob.defaultDigestAlgorithm()
+            + ")");
+    System.out.println(
+        "  --signature <alg>          Override document signer signature (default "
+            + PersonalizationJob.defaultSignatureAlgorithm()
+            + ")");
     System.out.println("  --pace-can/--pace-pin/--pace-puk <value>  Seed PACE credentials");
     System.out.println("  --omit-secrets             Skip installing all issuer secrets");
     System.out.println("  --omit-mrz-secret          Skip the MRZ BAC seed while keeping others");
