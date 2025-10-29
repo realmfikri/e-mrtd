@@ -78,6 +78,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -132,9 +133,26 @@ public final class SimRunner {
     Path taKeyPath = config.taKeyPath;
     Path jsonOutPath = config.reportOutput;
     Path eventsOutPath = config.eventsOutput;
+    IssuerSimulator.Result issuerResult = config.issuerResult;
+    PersonalizationJob issuerJob = issuerResult != null ? issuerResult.getJob() : null;
+    List<String> issuerLifecycleTargets = issuerJob != null ? issuerJob.getLifecycleTargets() : List.of();
+    boolean issuerSpecifiesLifecycle = issuerResult != null;
+    boolean applyPersonalizedLifecycle = issuerSpecifiesLifecycle
+        ? containsLifecycleTarget(issuerLifecycleTargets, "PERSONALIZED")
+        : true;
+    boolean applyLockedLifecycle = issuerSpecifiesLifecycle
+        ? (!issuerResult.isLeavePersonalized()
+            && containsLifecycleTarget(issuerLifecycleTargets, "LOCKED"))
+        : true;
     String doc = hasText(config.docNumber) ? config.docNumber : DEFAULT_DOC;
     String dob = hasText(config.dateOfBirth) ? config.dateOfBirth : DEFAULT_DOB;
     String doe = hasText(config.dateOfExpiry) ? config.dateOfExpiry : DEFAULT_DOE;
+    if (issuerJob != null && issuerJob.getMrzInfo() != null) {
+      MRZInfo mrzInfo = issuerJob.getMrzInfo();
+      doc = mrzInfo.getDocumentNumber();
+      dob = mrzInfo.getDateOfBirth();
+      doe = mrzInfo.getDateOfExpiry();
+    }
     String can = config.can;
     String pin = config.pin;
     String puk = config.puk;
@@ -152,11 +170,20 @@ public final class SimRunner {
 
     // Boot emulator & install applet
     SessionReport report = new SessionReport();
-    CardSimulator sim = new CardSimulator();
+    boolean createdSimulator = config.cardSimulator == null;
+    CardSimulator sim = createdSimulator ? new CardSimulator() : config.cardSimulator;
     AID aid = new AID(MRTD_AID, (short)0, (byte)MRTD_AID.length);
-    sim.installApplet(aid, sos.passportapplet.PassportApplet.class);
+    if (createdSimulator) {
+      sim.installApplet(aid, sos.passportapplet.PassportApplet.class);
+    }
 
-    CardTerminal term = CardTerminalSimulator.terminal(sim);
+    CardTerminal term;
+    if (!createdSimulator && issuerResult != null && issuerResult.getTerminal() != null
+        && config.cardSimulator == issuerResult.getSimulator()) {
+      term = issuerResult.getTerminal();
+    } else {
+      term = CardTerminalSimulator.terminal(sim);
+    }
     Card card = term.connect("*");
     CardChannel ch = card.getBasicChannel();
     report.session.transport = resolveTransport(term, card);
@@ -165,19 +192,42 @@ public final class SimRunner {
     apdu(ch, 0x00, 0xA4, 0x04, 0x0C, MRTD_AID, "SELECT AID");
 
     // --- tulis data minimal (COM + DG1 + DG2) ke chip ---
-    SODArtifacts personalizationArtifacts = personalize(ch, corruptDG2, largeDG2, doc, dob, doe);
+    SODArtifacts personalizationArtifacts;
+    boolean createdFromIssuerArtifacts = issuerResult != null && createdSimulator;
+    if (createdFromIssuerArtifacts) {
+      personalizationArtifacts = issuerResult.getArtifacts();
+      hydrateFromArtifacts(ch, personalizationArtifacts);
+    } else if (createdSimulator) {
+      personalizationArtifacts = personalize(ch, corruptDG2, largeDG2, doc, dob, doe);
+    } else if (issuerResult != null) {
+      personalizationArtifacts = issuerResult.getArtifacts();
+    } else {
+      personalizationArtifacts = null;
+    }
 
     // --- langkah penting: tanam kunci BAC di applet ---
-    if (seed) {
+    boolean reuseIssuerCard = issuerResult != null && !createdSimulator
+        && config.cardSimulator == issuerResult.getSimulator();
+    boolean mrzSeedRequested = (seed && !reuseIssuerCard)
+        || (issuerResult != null && createdSimulator && issuerResult.isMrzSeeded());
+    boolean paceSeedRequested = (seed && !reuseIssuerCard)
+        || (issuerResult != null && createdSimulator
+            && (issuerResult.isPaceCanInstalled()
+                || issuerResult.isPacePinInstalled()
+                || issuerResult.isPacePukInstalled()));
+
+    if (mrzSeedRequested) {
       byte[] mrzSeed = IssuerSecretEncoder.encodeMrzSeed(doc, dob, doe);
       int sw = putData(ch, 0x00, 0x62, mrzSeed, "PUT MRZ TLV");
       if (sw != 0x9000) {
         throw new RuntimeException(String.format(
             "SET BAC via PUT DATA gagal (SW=%04X). Cek format TLV.", sw));
       }
+    }
+    if (paceSeedRequested) {
       byte[] paceSecretsTlv = IssuerSecretEncoder.encodePaceSecrets(can, pin, puk);
       if (paceSecretsTlv != null) {
-        sw = putData(ch, 0x00, 0x65, paceSecretsTlv, "PUT PACE secrets TLV");
+        int sw = putData(ch, 0x00, 0x65, paceSecretsTlv, "PUT PACE secrets TLV");
         if (sw != 0x9000) {
           throw new RuntimeException(String.format(
               "SET PACE secrets via PUT DATA gagal (SW=%04X). Cek format TLV (tag 0x66 entries berisi [keyRef||secret]).",
@@ -195,21 +245,29 @@ public final class SimRunner {
       }
     }
 
-    byte[] currentDateTlv = encodeCurrentDate(terminalAuthDate);
-    int dateSw = putData(ch, 0x00, PUT_DATA_P2_CURRENT_DATE, currentDateTlv, "PUT current date digits");
-    if (dateSw != 0x9000) {
-      throw new RuntimeException(String.format("Gagal menetapkan tanggal saat ini untuk TA (SW=%04X).", dateSw));
-    }
+    boolean shouldProgramLifecycle = createdSimulator || (seed && !reuseIssuerCard);
+    if (shouldProgramLifecycle) {
+      byte[] currentDateTlv = encodeCurrentDate(terminalAuthDate);
+      int dateSw = putData(ch, 0x00, PUT_DATA_P2_CURRENT_DATE, currentDateTlv, "PUT current date digits");
+      if (dateSw != 0x9000) {
+        throw new RuntimeException(String.format("Gagal menetapkan tanggal saat ini untuk TA (SW=%04X).", dateSw));
+      }
 
-    int lifecycleSw = putData(ch, 0xDE, 0xAF, new byte[0], "SET LIFECYCLE → PERSONALIZED");
-    if (lifecycleSw != 0x9000) {
-      throw new RuntimeException(String.format(
-          "Gagal mengatur state PERSONALIZED (SW=%04X).", lifecycleSw));
-    }
-    lifecycleSw = putData(ch, 0xDE, 0xAD, new byte[0], "SET LIFECYCLE → LOCKED");
-    if (lifecycleSw != 0x9000) {
-      throw new RuntimeException(String.format(
-          "Gagal mengunci chip (SW=%04X).", lifecycleSw));
+      if (applyPersonalizedLifecycle || createdSimulator) {
+        int lifecycleSw = putData(ch, 0xDE, 0xAF, new byte[0], "SET LIFECYCLE → PERSONALIZED");
+        if (lifecycleSw != 0x9000) {
+          throw new RuntimeException(String.format(
+              "Gagal mengatur state PERSONALIZED (SW=%04X).", lifecycleSw));
+        }
+      }
+      if ((applyLockedLifecycle || createdSimulator)
+          && !(issuerResult != null && issuerResult.isLeavePersonalized())) {
+        int lifecycleSw = putData(ch, 0xDE, 0xAD, new byte[0], "SET LIFECYCLE → LOCKED");
+        if (lifecycleSw != 0x9000) {
+          throw new RuntimeException(String.format(
+              "Gagal mengunci chip (SW=%04X).", lifecycleSw));
+        }
+      }
     }
 
     // --- sekarang baca via PassportService + BAC ---
@@ -313,24 +371,60 @@ public final class SimRunner {
 
     // baca DG1 (MRZ)
     sink.onPhase(SimPhase.READING, "Reading logical data structure");
+    boolean dg1Read = false;
     try (InputStream in = svc.getInputStream(PassportService.EF_DG1)) {
-      DG1File dg1 = new DG1File(in);
-      MRZInfo info = dg1.getMRZInfo();
-      System.out.println("==== DG1 ====");
-      System.out.println("Doc#: " + info.getDocumentNumber());
-      System.out.println("DOB  : " + info.getDateOfBirth());
-      System.out.println("DOE  : " + info.getDateOfExpiry());
-      System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
-      System.out.println("Gender: " + info.getGender()); // jmrtd 0.8.x
-      report.dataGroups.addPresent(1);
-      report.dataGroups.setDg1Mrz(new SessionReport.MrzSummary(
-          info.getDocumentNumber(),
-          info.getDateOfBirth(),
-          info.getDateOfExpiry(),
-          info.getPrimaryIdentifier(),
-          info.getSecondaryIdentifier(),
-          info.getIssuingState(),
-          info.getNationality()));
+      if (in != null) {
+        DG1File dg1 = new DG1File(in);
+        MRZInfo info = dg1.getMRZInfo();
+        System.out.println("==== DG1 ====");
+        System.out.println("Doc#: " + info.getDocumentNumber());
+        System.out.println("DOB  : " + info.getDateOfBirth());
+        System.out.println("DOE  : " + info.getDateOfExpiry());
+        System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
+        System.out.println("Gender: " + info.getGender()); // jmrtd 0.8.x
+        report.dataGroups.addPresent(1);
+        report.dataGroups.setDg1Mrz(new SessionReport.MrzSummary(
+            info.getDocumentNumber(),
+            info.getDateOfBirth(),
+            info.getDateOfExpiry(),
+            info.getPrimaryIdentifier(),
+            info.getSecondaryIdentifier(),
+            info.getIssuingState(),
+            info.getNationality()));
+        dg1Read = true;
+      }
+    } catch (Exception readFailure) {
+      System.out.println("DG1 read error: " + readFailure.getMessage());
+    }
+    if (!dg1Read && personalizationArtifacts != null) {
+      byte[] dg1Bytes = personalizationArtifacts.getDataGroupBytes(1);
+      if (dg1Bytes != null && dg1Bytes.length > 0) {
+        try (ByteArrayInputStream fallback = new ByteArrayInputStream(dg1Bytes)) {
+          DG1File dg1 = new DG1File(fallback);
+          MRZInfo info = dg1.getMRZInfo();
+          System.out.println("==== DG1 (artifact fallback) ====");
+          System.out.println("Doc#: " + info.getDocumentNumber());
+          System.out.println("DOB  : " + info.getDateOfBirth());
+          System.out.println("DOE  : " + info.getDateOfExpiry());
+          System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
+          System.out.println("Gender: " + info.getGender());
+          report.dataGroups.addPresent(1);
+          report.dataGroups.setDg1Mrz(new SessionReport.MrzSummary(
+              info.getDocumentNumber(),
+              info.getDateOfBirth(),
+              info.getDateOfExpiry(),
+              info.getPrimaryIdentifier(),
+              info.getSecondaryIdentifier(),
+              info.getIssuingState(),
+              info.getNationality()));
+          dg1Read = true;
+        } catch (IOException fallbackError) {
+          System.out.println("DG1 artifact fallback failed: " + fallbackError.getMessage());
+        }
+      }
+    }
+    if (!dg1Read) {
+      throw new RuntimeException("Failed to read DG1 from card or issuer artifacts");
     }
 
     sink.onPhase(SimPhase.VERIFYING, "Validating Passive/Active/Terminal auth");
@@ -364,7 +458,7 @@ public final class SimRunner {
       report.setPassiveAuthentication(null);
     }
 
-    SessionReport.Dg2Metadata dg2Metadata = summarizeDG2(svc, largeDG2, config, sink);
+    SessionReport.Dg2Metadata dg2Metadata = summarizeDG2(svc, largeDG2, config, sink, personalizationArtifacts);
     if (dg2Metadata != null) {
       report.dataGroups.addPresent(2);
       report.dataGroups.setDg2Metadata(dg2Metadata);
@@ -499,6 +593,54 @@ public final class SimRunner {
     Files.deleteIfExists(trustDir.resolve("dsc.cer"));
     Files.write(trustDir.resolve("csca.cer"), artifacts.getCscaCert().getEncoded());
     return artifacts;
+  }
+
+  private static void hydrateFromArtifacts(CardChannel ch, SODArtifacts artifacts) throws Exception {
+    PersonalizationJob job = artifacts.getJob();
+    List<Integer> comTags = job != null ? job.getComTagList() : new ArrayList<>();
+    if (comTags.isEmpty()) {
+      comTags.add(LDSFile.EF_DG1_TAG);
+      for (Integer dg : artifacts.getPresentDataGroupNumbers()) {
+        comTags.add(Integer.valueOf(0x0100 | (dg.intValue() & 0xFF)));
+      }
+      Collections.sort(comTags);
+    }
+    int[] tagArray = comTags.stream().mapToInt(Integer::intValue).toArray();
+    COMFile comFile = new COMFile("1.7", "4.0.0", tagArray);
+    byte[] comBytes = comFile.getEncoded();
+    createEF(ch, EF_COM, comBytes.length, "CREATE EF.COM");
+    selectEF(ch, EF_COM, "SELECT EF.COM before WRITE");
+    writeBinary(ch, comBytes, "WRITE EF.COM");
+
+    List<Map.Entry<Integer, byte[]>> dataGroups = new ArrayList<>(artifacts.getDataGroupBytesMap().entrySet());
+    dataGroups.sort(Comparator.comparingInt(Map.Entry::getKey));
+    for (Map.Entry<Integer, byte[]> entry : dataGroups) {
+      Integer dg = entry.getKey();
+      byte[] bytes = entry.getValue();
+      if (dg == null || bytes == null || bytes.length == 0) {
+        continue;
+      }
+      short fid = (short) (0x0100 | (dg.intValue() & 0xFF));
+      createEF(ch, fid, bytes.length, String.format("CREATE EF.DG%d", dg));
+      selectEF(ch, fid, String.format("SELECT EF.DG%d before WRITE", dg));
+      writeBinary(ch, bytes, String.format("WRITE EF.DG%d", dg));
+    }
+
+    byte[] cardAccessBytes = artifacts.getCardAccessBytes();
+    if (cardAccessBytes != null && cardAccessBytes.length > 0) {
+      createEF(ch, EF_CARD_ACCESS, cardAccessBytes.length, "CREATE EF.CardAccess");
+      selectEF(ch, EF_CARD_ACCESS, "SELECT EF.CardAccess before WRITE");
+      writeBinary(ch, cardAccessBytes, "WRITE EF.CardAccess");
+    }
+
+    byte[] sodBytes = artifacts.getSodBytes();
+    createEF(ch, EF_SOD, sodBytes.length, "CREATE EF.SOD");
+    selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
+    writeBinary(ch, sodBytes, "WRITE EF.SOD");
+
+    if (artifacts.getAaKeyPair() != null && artifacts.getAaKeyPair().getPrivate() != null) {
+      seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
+    }
   }
 
   private static List<PACEInfo> parsePaceInfos(byte[] cardAccessBytes) {
@@ -1930,16 +2072,24 @@ public final class SimRunner {
       PassportService svc,
       boolean largeScenario,
       SimConfig config,
-      SimEvents sink) {
-    byte[] dg2Bytes;
+      SimEvents sink,
+      SODArtifacts personalizationArtifacts) {
+    byte[] dg2Bytes = null;
     try (InputStream in = svc.getInputStream(PassportService.EF_DG2)) {
-      if (in == null) {
-        System.out.println("DG2 not present");
-        return null;
+      if (in != null) {
+        dg2Bytes = in.readAllBytes();
       }
-      dg2Bytes = in.readAllBytes();
     } catch (Exception e) {
       System.out.println("DG2 read error: " + e.getMessage());
+    }
+    if ((dg2Bytes == null || dg2Bytes.length == 0) && personalizationArtifacts != null) {
+      dg2Bytes = personalizationArtifacts.getDataGroupBytes(2);
+      if (dg2Bytes != null && dg2Bytes.length > 0) {
+        System.out.println("Using issuer artifacts for DG2 metadata.");
+      }
+    }
+    if (dg2Bytes == null || dg2Bytes.length == 0) {
+      System.out.println("DG2 not present");
       return null;
     }
 
@@ -2153,5 +2303,17 @@ public final class SimRunner {
 
   private static boolean hasText(String value) {
     return value != null && !value.isEmpty();
+  }
+
+  private static boolean containsLifecycleTarget(List<String> lifecycleTargets, String target) {
+    if (lifecycleTargets == null || lifecycleTargets.isEmpty() || target == null) {
+      return false;
+    }
+    for (String candidate : lifecycleTargets) {
+      if (candidate != null && candidate.equalsIgnoreCase(target)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
