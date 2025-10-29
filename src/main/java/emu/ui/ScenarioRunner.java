@@ -2,6 +2,7 @@ package emu.ui;
 
 import emu.IssuerJobBuilder;
 import emu.IssuerSimulator;
+import emu.PersonalizationJob;
 import emu.SessionReport;
 import emu.SimConfig;
 import emu.SimEvents;
@@ -51,6 +52,15 @@ final class ScenarioRunner {
       AdvancedOptionsSnapshot advancedOptions,
       Path reportPath,
       ScenarioExecutionListener listener) {
+    return createTask(preset, advancedOptions, reportPath, listener, null);
+  }
+
+  Task<ScenarioResult> createTask(
+      ScenarioPreset preset,
+      AdvancedOptionsSnapshot advancedOptions,
+      Path reportPath,
+      ScenarioExecutionListener listener,
+      IssuerSimulator.Result initialIssuerResult) {
     Objects.requireNonNull(preset, "preset");
     Objects.requireNonNull(advancedOptions, "advancedOptions");
     Objects.requireNonNull(reportPath, "reportPath");
@@ -75,7 +85,7 @@ final class ScenarioRunner {
         int exitCode = 0;
         String failedStep = null;
         SessionReport finalReport = null;
-        IssuerSimulator.Result finalIssuerResult = null;
+        IssuerSimulator.Result finalIssuerResult = initialIssuerResult;
 
         for (ScenarioStep step : preset.getSteps()) {
           if (isCancelled()) {
@@ -87,8 +97,8 @@ final class ScenarioRunner {
 
           if (READ_MAIN_CLASS.equals(step.getMainClass())) {
             try {
-              SimConfig config = buildSimConfig(step, advancedOptions, reportPath);
-              finalReport = runSimStep(step, config, listener);
+              SimConfig config = buildSimConfig(step, advancedOptions, reportPath, finalIssuerResult);
+              finalReport = runSimStep(step, config, finalIssuerResult, listener);
             } catch (Exception e) {
               listener.onLog(SimLogCategory.GENERAL, step.getName(), "Error: " + e.getMessage());
               exitCode = 1;
@@ -180,8 +190,18 @@ final class ScenarioRunner {
     Files.createDirectories(dir);
   }
 
-  private SessionReport runSimStep(ScenarioStep step, SimConfig config, ScenarioExecutionListener listener) throws Exception {
+  private SessionReport runSimStep(
+      ScenarioStep step,
+      SimConfig config,
+      IssuerSimulator.Result issuerResult,
+      ScenarioExecutionListener listener) throws Exception {
     UiSimEvents events = new UiSimEvents(listener, step.getName());
+    if (issuerResult != null) {
+      listener.onLog(
+          SimLogCategory.GENERAL,
+          step.getName(),
+          "Reusing issuer personalization from previous step");
+    }
     SessionReport report = simRunner.run(config, events);
     listener.onReport(report);
     return report;
@@ -230,7 +250,8 @@ final class ScenarioRunner {
   private SimConfig buildSimConfig(
       ScenarioStep step,
       AdvancedOptionsSnapshot options,
-      Path reportPath) {
+      Path reportPath,
+      IssuerSimulator.Result issuerResult) {
     SimConfig.Builder builder = new SimConfig.Builder()
         .docNumber(DEFAULT_DOC)
         .dateOfBirth(DEFAULT_DOB)
@@ -242,6 +263,20 @@ final class ScenarioRunner {
         ? reportPath.getParent().resolve("faces")
         : Paths.get("target", "ui-faces");
     builder.facePreviewDirectory(previewDir);
+
+    if (issuerResult != null) {
+      builder.issuerResult(issuerResult);
+      PersonalizationJob job = issuerResult.getJob();
+      if (job != null && job.getMrzInfo() != null) {
+        builder.docNumber(job.getMrzInfo().getDocumentNumber());
+        builder.dateOfBirth(job.getMrzInfo().getDateOfBirth());
+        builder.dateOfExpiry(job.getMrzInfo().getDateOfExpiry());
+      }
+      issuerResult.getPaceCan().ifPresent(builder::can);
+      issuerResult.getPacePin().ifPresent(builder::pin);
+      issuerResult.getPacePuk().ifPresent(builder::puk);
+      issuerResult.getOpenComSodReadsPolicy().ifPresent(builder::openComSodReads);
+    }
 
     applyStepArgs(builder, step.getArgs());
     options.applyToBuilder(builder);
