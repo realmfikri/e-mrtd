@@ -2085,6 +2085,12 @@ public final class SimRunner {
       SimConfig config,
       SimEvents sink,
       SODArtifacts personalizationArtifacts) {
+    String issuerPreviewPath = null;
+    if (config != null && config.issuerResult != null) {
+      issuerPreviewPath = config.issuerResult.getFacePreviewPath()
+          .map(path -> path.toAbsolutePath().toString())
+          .orElse(null);
+    }
     byte[] dg2Bytes = null;
     try (InputStream in = svc.getInputStream(PassportService.EF_DG2)) {
       if (in != null) {
@@ -2108,7 +2114,7 @@ public final class SimRunner {
     if (dg2Bytes.length > warningThreshold) {
       System.out.printf("DG2 size %d bytes exceeds safe threshold (%d). Skipping detailed parse.%n",
           dg2Bytes.length, warningThreshold);
-      return new SessionReport.Dg2Metadata(dg2Bytes.length, largeScenario, true, List.of(), null);
+      return new SessionReport.Dg2Metadata(dg2Bytes.length, largeScenario, true, List.of(), null, issuerPreviewPath);
     }
 
     try (ByteArrayInputStream in = new ByteArrayInputStream(dg2Bytes)) {
@@ -2151,10 +2157,22 @@ public final class SimRunner {
         System.out.println("(DG2 generated in large-image scenario)");
       }
       System.out.println("----------------------");
-      return new SessionReport.Dg2Metadata(dg2Bytes.length, largeScenario, false, faces, previewPath);
+      return new SessionReport.Dg2Metadata(
+          dg2Bytes.length,
+          largeScenario,
+          false,
+          faces,
+          previewPath,
+          issuerPreviewPath);
     } catch (IOException | RuntimeException e) {
       System.out.println("DG2 parse error: " + e.getMessage());
-      return new SessionReport.Dg2Metadata(dg2Bytes.length, largeScenario, false, List.of(), null);
+      return new SessionReport.Dg2Metadata(
+          dg2Bytes.length,
+          largeScenario,
+          false,
+          List.of(),
+          null,
+          issuerPreviewPath);
     }
   }
 

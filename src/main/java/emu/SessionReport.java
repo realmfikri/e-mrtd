@@ -286,6 +286,8 @@ public final class SessionReport {
       sb.append("\"truncated\":").append(metadata.truncated).append(',');
       sb.append("\"previewPath\":").append(toJsonString(metadata.previewPath));
       sb.append(',');
+      sb.append("\"issuerPreviewPath\":").append(toJsonString(metadata.issuerPreviewPath));
+      sb.append(',');
       sb.append("\"faces\":").append(faceList(metadata.faces));
       sb.append('}');
       return sb.toString();
@@ -324,14 +326,20 @@ public final class SessionReport {
     public final boolean truncated;
     public final List<Dg2FaceSummary> faces;
     public final String previewPath;
+    public final String issuerPreviewPath;
 
-    public Dg2Metadata(int length, boolean largeScenario, boolean truncated, List<Dg2FaceSummary> faces,
-                       String previewPath) {
+    public Dg2Metadata(int length,
+                       boolean largeScenario,
+                       boolean truncated,
+                       List<Dg2FaceSummary> faces,
+                       String previewPath,
+                       String issuerPreviewPath) {
       this.length = length;
       this.largeScenario = largeScenario;
       this.truncated = truncated;
       this.faces = faces;
       this.previewPath = previewPath;
+      this.issuerPreviewPath = issuerPreviewPath;
     }
   }
 

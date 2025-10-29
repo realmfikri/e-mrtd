@@ -94,8 +94,12 @@ final class PersonalizationSupport {
     ecGenerator.initialize(new ECGenParameterSpec(job.getChipAuthenticationCurve()), random);
     KeyPair chipAuthKeyPair = ecGenerator.generateKeyPair();
 
-    Date notBefore = new Date(System.currentTimeMillis() - 24L * 60 * 60 * 1000);
-    Date notAfter = new Date(System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000);
+    long now = job.getDeterministicSeed() != null
+        ? job.getDeterministicSeed().longValue()
+        : System.currentTimeMillis();
+    Date notBefore = new Date(now - 24L * 60 * 60 * 1000);
+    Date notAfter = new Date(now + 365L * 24 * 60 * 60 * 1000);
+    Date docSignerExpiry = new Date(now + 180L * 24 * 60 * 60 * 1000);
 
     X509Certificate cscaCert = createCertificate(
         "CN=CSCA Emulator,OU=Emu,O=JMRTD,L=Sample,C=UT",
@@ -115,7 +119,7 @@ final class PersonalizationSupport {
         cscaPair.getPrivate(),
         false,
         notBefore,
-        new Date(System.currentTimeMillis() + 180L * 24 * 60 * 60 * 1000),
+        docSignerExpiry,
         job.getSignatureAlgorithm(),
         random);
 

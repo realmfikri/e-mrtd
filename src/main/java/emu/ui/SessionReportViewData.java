@@ -25,6 +25,8 @@ final class SessionReportViewData {
   private final List<Integer> presentDataGroups;
   private final boolean dg3Readable;
   private final boolean dg4Readable;
+  private final String dg2PreviewPath;
+  private final String issuerPreviewPath;
 
   SessionReportViewData(
       String transport,
@@ -47,7 +49,9 @@ final class SessionReportViewData {
       MrzSummary mrzSummary,
       List<Integer> presentDataGroups,
       boolean dg3Readable,
-      boolean dg4Readable) {
+      boolean dg4Readable,
+      String dg2PreviewPath,
+      String issuerPreviewPath) {
     this.transport = transport;
     this.secureMessagingMode = secureMessagingMode;
     this.paceAttempted = paceAttempted;
@@ -69,6 +73,8 @@ final class SessionReportViewData {
     this.presentDataGroups = List.copyOf(presentDataGroups);
     this.dg3Readable = dg3Readable;
     this.dg4Readable = dg4Readable;
+    this.dg2PreviewPath = dg2PreviewPath;
+    this.issuerPreviewPath = issuerPreviewPath;
   }
 
   String getTransport() {
@@ -153,6 +159,14 @@ final class SessionReportViewData {
 
   boolean isDg4Readable() {
     return dg4Readable;
+  }
+
+  String getDg2PreviewPath() {
+    return dg2PreviewPath;
+  }
+
+  String getIssuerPreviewPath() {
+    return issuerPreviewPath;
   }
 
   static final class MrzSummary {

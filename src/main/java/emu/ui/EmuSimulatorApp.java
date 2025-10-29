@@ -7,6 +7,7 @@ import emu.SimLogCategory;
 import emu.SimPhase;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
@@ -41,6 +42,7 @@ import org.jmrtd.lds.icao.MRZInfo;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
@@ -95,7 +97,7 @@ public final class EmuSimulatorApp extends Application {
   private final Label issuerPassiveAuthTrustIssuesValue = multilineValueLabel();
   private final Label issuerFaceSourceValue = multilineValueLabel();
   private final Label issuerFacePreviewPathValue = multilineValueLabel();
-  private final ImageView issuerFacePreviewImage = new ImageView();
+  private final ImageView issuerFacePreviewImage = createPreviewImageView(320);
 
   private final Label cardMrzDocumentNumberValue = valueLabel();
   private final Label terminalMrzDocumentNumberValue = valueLabel();
@@ -131,6 +133,8 @@ public final class EmuSimulatorApp extends Application {
   private final Label terminalPaSignerValue = multilineValueLabel();
   private final Label cardPaChainValue = valueLabel();
   private final Label terminalPaChainValue = multilineValueLabel();
+  private final ImageView cardPortraitImage = createPreviewImageView(240);
+  private final ImageView terminalFacePreviewImage = createPreviewImageView(240);
 
   private final ListView<String> dgListView = new ListView<>();
   private final Label dg3ReadableValue = valueLabel();
@@ -317,6 +321,27 @@ public final class EmuSimulatorApp extends Application {
     VBox container = new VBox(12);
     container.setPadding(new Insets(16));
 
+    Label portraitHeader = new Label("Portrait previews");
+    portraitHeader.getStyleClass().add("header-label");
+
+    Label cardPortraitHeader = new Label("Issuer portrait");
+    VBox cardPortraitBox = new VBox(6, cardPortraitHeader, cardPortraitImage);
+    cardPortraitBox.visibleProperty().bind(cardPortraitImage.imageProperty().isNotNull());
+    cardPortraitBox.managedProperty().bind(cardPortraitBox.visibleProperty());
+
+    Label terminalPortraitHeader = new Label("Terminal capture");
+    VBox terminalPortraitBox = new VBox(6, terminalPortraitHeader, terminalFacePreviewImage);
+    terminalPortraitBox.visibleProperty().bind(terminalFacePreviewImage.imageProperty().isNotNull());
+    terminalPortraitBox.managedProperty().bind(terminalPortraitBox.visibleProperty());
+
+    HBox portraitRow = new HBox(24, cardPortraitBox, terminalPortraitBox);
+    portraitRow.setAlignment(Pos.CENTER_LEFT);
+    portraitRow.visibleProperty().bind(
+        Bindings.or(cardPortraitBox.visibleProperty(), terminalPortraitBox.visibleProperty()));
+    portraitRow.managedProperty().bind(portraitRow.visibleProperty());
+    portraitHeader.visibleProperty().bind(portraitRow.visibleProperty());
+    portraitHeader.managedProperty().bind(portraitRow.visibleProperty());
+
     Label mrzHeader = new Label("MRZ (DG1)");
     mrzHeader.getStyleClass().add("header-label");
     GridPane mrzGrid = createComparisonGrid();
@@ -348,7 +373,15 @@ public final class EmuSimulatorApp extends Application {
     addComparisonRow(paGrid, 3, "Signer", cardPaSignerValue, terminalPaSignerValue);
     addComparisonRow(paGrid, 4, "Chain status", cardPaChainValue, terminalPaChainValue);
 
-    container.getChildren().addAll(mrzHeader, mrzGrid, smHeader, smGrid, paHeader, paGrid);
+    container.getChildren().addAll(
+        portraitHeader,
+        portraitRow,
+        mrzHeader,
+        mrzGrid,
+        smHeader,
+        smGrid,
+        paHeader,
+        paGrid);
 
     Tab tab = new Tab("Card vs Terminal", container);
     tab.setClosable(false);
@@ -1125,12 +1158,96 @@ public final class EmuSimulatorApp extends Application {
     return label;
   }
 
+  private static ImageView createPreviewImageView(double fitWidth) {
+    ImageView view = new ImageView();
+    view.setPreserveRatio(true);
+    view.setSmooth(true);
+    view.setFitWidth(fitWidth);
+    return view;
+  }
+
   private static String yesNo(boolean value) {
     return value ? "Yes" : "No";
   }
 
   private static String orDefault(String value) {
     return (value == null || value.isBlank()) ? "—" : value;
+  }
+
+  private void loadFacePreviewImage(Path path, ImageView target, String logSource) {
+    if (path == null) {
+      target.setImage(null);
+      return;
+    }
+
+    Path absolute = path.toAbsolutePath();
+    if (!Files.exists(absolute)) {
+      target.setImage(null);
+      logFacePreviewIssue(logSource, "Face preview not found at " + absolute);
+      return;
+    }
+
+    target.setImage(null);
+    double width = target.getFitWidth();
+    Image image;
+    try {
+      image = new Image(absolute.toUri().toString(), width > 0 ? width : 0, 0, true, true, true);
+    } catch (Exception ex) {
+      logFacePreviewIssue(logSource, "Unable to load face preview image: " + ex.getMessage());
+      return;
+    }
+
+    if (image.isError()) {
+      Throwable exception = image.getException();
+      logFacePreviewIssue(
+          logSource,
+          "Unable to load face preview image: " + (exception != null ? exception.getMessage() : "unknown error"));
+      return;
+    }
+
+    if (!image.isBackgroundLoading() || image.getProgress() >= 1.0) {
+      target.setImage(image);
+    } else {
+      image.progressProperty().addListener((obs, oldValue, newValue) -> {
+        if (newValue != null && newValue.doubleValue() >= 1.0 && !image.isError()) {
+          Platform.runLater(() -> target.setImage(image));
+        }
+      });
+    }
+
+    image.exceptionProperty().addListener((obs, oldEx, newEx) -> {
+      if (newEx != null) {
+        Platform.runLater(() -> {
+          target.setImage(null);
+          logFacePreviewIssue(logSource, "Unable to load face preview image: " + newEx.getMessage());
+        });
+      }
+    });
+  }
+
+  private void loadFacePreviewImage(String pathString, ImageView target, String logSource) {
+    if (pathString == null || pathString.isBlank()) {
+      target.setImage(null);
+      return;
+    }
+    try {
+      loadFacePreviewImage(Paths.get(pathString), target, logSource);
+    } catch (InvalidPathException ex) {
+      target.setImage(null);
+      logFacePreviewIssue(logSource, "Invalid face preview path: " + pathString);
+    }
+  }
+
+  private void logFacePreviewIssue(String logSource, String message) {
+    if (message == null || message.isBlank()) {
+      return;
+    }
+    Runnable task = () -> addLogEntry(SimLogCategory.GENERAL, logSource, message);
+    if (Platform.isFxApplicationThread()) {
+      task.run();
+    } else {
+      Platform.runLater(task);
+    }
   }
 
   private void clearIssuerTab() {
@@ -1156,6 +1273,9 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private void clearCardDetailsTab() {
+    cardPortraitImage.setImage(null);
+    terminalFacePreviewImage.setImage(null);
+
     cardMrzDocumentNumberValue.setText(ISSUER_PLACEHOLDER);
     cardMrzIssuingStateValue.setText(ISSUER_PLACEHOLDER);
     cardMrzNationalityValue.setText(ISSUER_PLACEHOLDER);
@@ -1249,25 +1369,7 @@ public final class EmuSimulatorApp extends Application {
 
     issuerResult.getFacePreviewPath().ifPresentOrElse(path -> {
       issuerFacePreviewPathValue.setText(path.toAbsolutePath().toString());
-      if (Files.exists(path)) {
-        try {
-          Image image = new Image(path.toUri().toString(), 320, 0, true, true);
-          if (!image.isError()) {
-            issuerFacePreviewImage.setImage(image);
-          } else {
-            issuerFacePreviewImage.setImage(null);
-            addLogEntry(
-                SimLogCategory.GENERAL,
-                "Issuer",
-                "Unable to load face preview image: " + image.getException());
-          }
-        } catch (Exception ex) {
-          issuerFacePreviewImage.setImage(null);
-          addLogEntry(SimLogCategory.GENERAL, "Issuer", "Unable to load face preview image: " + ex.getMessage());
-        }
-      } else {
-        issuerFacePreviewImage.setImage(null);
-      }
+      loadFacePreviewImage(path, issuerFacePreviewImage, "Issuer");
     }, () -> {
       issuerFacePreviewPathValue.setText("(not generated)");
       issuerFacePreviewImage.setImage(null);
@@ -1283,6 +1385,7 @@ public final class EmuSimulatorApp extends Application {
 
   private void updateCardDetailsTab(SessionReportViewData readerData, IssuerSimulator.Result issuerResult) {
     boolean hasIssuer = issuerResult != null;
+    String issuerPreviewPath = null;
     if (hasIssuer) {
       PersonalizationJob job = issuerResult.getJob();
       MRZInfo mrz = job != null ? job.getMrzInfo() : null;
@@ -1302,6 +1405,9 @@ public final class EmuSimulatorApp extends Application {
       cardProvisionedDataGroupsValue.setText(formatDataGroupCollection(job.getEnabledDataGroups()));
       cardPaSignerValue.setText("—");
       cardPaChainValue.setText("—");
+      issuerPreviewPath = issuerResult.getFacePreviewPath()
+          .map(path -> path.toAbsolutePath().toString())
+          .orElse(null);
     } else {
       cardMrzDocumentNumberValue.setText(ISSUER_PLACEHOLDER);
       cardMrzIssuingStateValue.setText(ISSUER_PLACEHOLDER);
@@ -1321,6 +1427,7 @@ public final class EmuSimulatorApp extends Application {
       cardPaChainValue.setText(ISSUER_PLACEHOLDER);
     }
 
+    String terminalPreviewPath = null;
     if (readerData != null) {
       SessionReportViewData.MrzSummary mrz = readerData.getMrzSummary();
       if (mrz != null) {
@@ -1355,6 +1462,10 @@ public final class EmuSimulatorApp extends Application {
           formatDataGroupList(readerData.getPassiveAuthLockedDataGroups())));
       terminalPaSignerValue.setText(orDefault(readerData.getPassiveAuthSigner()));
       terminalPaChainValue.setText(orDefault(readerData.getPassiveAuthChainStatus()));
+      terminalPreviewPath = readerData.getDg2PreviewPath();
+      if (issuerPreviewPath == null) {
+        issuerPreviewPath = readerData.getIssuerPreviewPath();
+      }
     } else {
       terminalMrzDocumentNumberValue.setText(READER_PLACEHOLDER);
       terminalMrzIssuingStateValue.setText(READER_PLACEHOLDER);
@@ -1373,6 +1484,9 @@ public final class EmuSimulatorApp extends Application {
       terminalPaSignerValue.setText(READER_PLACEHOLDER);
       terminalPaChainValue.setText(READER_PLACEHOLDER);
     }
+
+    loadFacePreviewImage(issuerPreviewPath, cardPortraitImage, "Issuer");
+    loadFacePreviewImage(terminalPreviewPath, terminalFacePreviewImage, "Terminal");
 
     if (cardDetailsTab != null) {
       boolean enable = hasIssuer || readerData != null;

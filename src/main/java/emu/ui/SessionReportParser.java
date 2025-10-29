@@ -35,6 +35,8 @@ final class SessionReportParser {
     List<Integer> paBad = raw.pa != null ? safeList(raw.pa.badDGs) : Collections.emptyList();
     List<Integer> paMissing = raw.pa != null ? safeList(raw.pa.missingDGs) : Collections.emptyList();
     List<Integer> paLocked = raw.pa != null ? safeList(raw.pa.lockedDGs) : Collections.emptyList();
+    String dg2PreviewPath = dg.dg2 != null ? dg.dg2.previewPath : null;
+    String issuerPreviewPath = dg.dg2 != null ? dg.dg2.issuerPreviewPath : null;
     return new SessionReportViewData(
         raw.session.transport,
         raw.session.smMode,
@@ -56,7 +58,9 @@ final class SessionReportParser {
         mrzSummary,
         present,
         dg.dg3Readable,
-        dg.dg4Readable);
+        dg.dg4Readable,
+        dg2PreviewPath,
+        issuerPreviewPath);
   }
 
   static SessionReportViewData fromReport(SessionReport report) {
@@ -66,6 +70,9 @@ final class SessionReportParser {
     SessionReport.DataGroups dg = report.dataGroups != null ? report.dataGroups : new SessionReport.DataGroups();
     List<Integer> present = dg.getPresent();
     SessionReport.MrzSummary dg1 = dg.getDg1Mrz();
+    SessionReport.Dg2Metadata dg2Metadata = dg.getDg2Metadata();
+    String dg2PreviewPath = dg2Metadata != null ? dg2Metadata.previewPath : null;
+    String issuerPreviewPath = dg2Metadata != null ? dg2Metadata.issuerPreviewPath : null;
     return new SessionReportViewData(
         report.session.transport,
         report.session.smMode,
@@ -87,7 +94,9 @@ final class SessionReportParser {
         toViewMrz(dg1),
         present,
         dg.isDg3Readable(),
-        dg.isDg4Readable());
+        dg.isDg4Readable(),
+        dg2PreviewPath,
+        issuerPreviewPath);
   }
 
   private static List<Integer> safeList(List<Integer> values) {
@@ -166,6 +175,7 @@ final class SessionReportParser {
     boolean dg3Readable;
     boolean dg4Readable;
     RawMrz dg1;
+    RawDg2 dg2;
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
@@ -177,6 +187,12 @@ final class SessionReportParser {
     String secondaryIdentifier;
     String issuingState;
     String nationality;
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  private static final class RawDg2 {
+    String previewPath;
+    String issuerPreviewPath;
   }
 }
 
