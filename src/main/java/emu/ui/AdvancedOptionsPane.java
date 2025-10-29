@@ -4,6 +4,7 @@ import emu.PersonalizationJob;
 
 import javafx.geometry.Insets;
 import javafx.scene.Node;
+import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.DatePicker;
@@ -11,11 +12,16 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
+import javafx.scene.control.TextFormatter;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
+import javafx.stage.Window;
+import javafx.util.converter.IntegerStringConverter;
 
+import java.io.File;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -65,6 +71,9 @@ final class AdvancedOptionsPane extends TitledPane {
   private final CheckBox lifecycleSimulatorBox = new CheckBox("SIMULATOR");
   private final CheckBox lifecyclePersonalizedBox = new CheckBox("PERSONALIZED");
   private final CheckBox lifecycleLockedBox = new CheckBox("LOCKED");
+  private final TextField facePathField = new TextField();
+  private final TextField faceWidthField = new TextField();
+  private final TextField faceHeightField = new TextField();
 
   AdvancedOptionsPane() {
     setText("Advanced toggles");
@@ -131,7 +140,10 @@ final class AdvancedOptionsPane extends TitledPane {
         algorithmValue(digestAlgorithmBox),
         algorithmValue(signatureAlgorithmBox),
         selectedLifecycleTargets(),
-        openReadSelection());
+        openReadSelection(),
+        trimmed(facePathField.getText()),
+        parseInteger(faceWidthField),
+        parseInteger(faceHeightField));
   }
 
   private Node buildMrzSection() {
@@ -203,6 +215,49 @@ final class AdvancedOptionsPane extends TitledPane {
     Label title = new Label("Issuer personalization");
     title.getStyleClass().add("section-title");
 
+    Label portraitLabel = new Label("Portrait overrides");
+    portraitLabel.getStyleClass().add("section-title");
+
+    facePathField.setPromptText("Override face image (optional)");
+    Button browseButton = new Button("Browse…");
+    browseButton.setOnAction(event -> {
+      FileChooser chooser = new FileChooser();
+      chooser.setTitle("Select face image");
+      String existing = trimmed(facePathField.getText());
+      if (existing != null && !existing.isEmpty()) {
+        File current = new File(existing);
+        if (current.isDirectory()) {
+          chooser.setInitialDirectory(current);
+        } else if (current.getParentFile() != null && current.getParentFile().exists()) {
+          chooser.setInitialDirectory(current.getParentFile());
+        }
+      }
+      Window window = getScene() != null ? getScene().getWindow() : null;
+      File file = chooser.showOpenDialog(window);
+      if (file != null) {
+        facePathField.setText(file.getAbsolutePath());
+      }
+    });
+    HBox facePathRow = new HBox(6, facePathField, browseButton);
+    HBox.setHgrow(facePathField, Priority.ALWAYS);
+
+    faceWidthField.setPromptText("Width");
+    faceHeightField.setPromptText("Height");
+    faceWidthField.setPrefColumnCount(5);
+    faceHeightField.setPrefColumnCount(5);
+    faceWidthField.setTextFormatter(integerFormatter());
+    faceHeightField.setTextFormatter(integerFormatter());
+
+    Label sizeSeparator = new Label("×");
+    sizeSeparator.setStyle("-fx-font-weight: bold;");
+    HBox faceSizeBox = new HBox(6, faceWidthField, sizeSeparator, faceHeightField);
+
+    GridPane faceGrid = new GridPane();
+    faceGrid.setHgap(8);
+    faceGrid.setVgap(6);
+    addRow(faceGrid, 0, new Label("Face image"), facePathRow);
+    addRow(faceGrid, 1, new Label("Synthetic size"), faceSizeBox);
+
     Label dataGroupLabel = new Label("Data group inclusion");
     GridPane dgGrid = new GridPane();
     dgGrid.setHgap(8);
@@ -231,6 +286,8 @@ final class AdvancedOptionsPane extends TitledPane {
 
     box.getChildren().addAll(
         title,
+        portraitLabel,
+        faceGrid,
         dataGroupLabel,
         dgGrid,
         new Label("Algorithms"),
@@ -379,6 +436,29 @@ final class AdvancedOptionsPane extends TitledPane {
       }
     }
     return List.copyOf(tokens);
+  }
+
+  private static Integer parseInteger(TextField field) {
+    String value = trimmed(field.getText());
+    if (value == null || value.isEmpty()) {
+      return null;
+    }
+    try {
+      int parsed = Integer.parseInt(value);
+      return parsed > 0 ? parsed : null;
+    } catch (NumberFormatException ex) {
+      return null;
+    }
+  }
+
+  private TextFormatter<Integer> integerFormatter() {
+    return new TextFormatter<>(new IntegerStringConverter(), null, change -> {
+      String newText = change.getControlNewText();
+      if (newText == null || newText.isEmpty()) {
+        return change;
+      }
+      return newText.matches("\\d*") ? change : null;
+    });
   }
 
   private static final class DataGroupToggle {

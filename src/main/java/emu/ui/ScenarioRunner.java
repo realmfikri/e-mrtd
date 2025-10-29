@@ -384,6 +384,14 @@ final class ScenarioRunner {
     if (openRead != null) {
       args.add("--open-read=" + openRead);
     }
+    if (hasText(options.getIssuerFacePath())) {
+      args.add("--face-path=" + options.getIssuerFacePath());
+    }
+    Integer faceWidth = options.getIssuerFaceWidth();
+    Integer faceHeight = options.getIssuerFaceHeight();
+    if (faceWidth != null && faceHeight != null) {
+      args.add("--face-size=" + faceWidth + "x" + faceHeight);
+    }
     return args;
   }
 
