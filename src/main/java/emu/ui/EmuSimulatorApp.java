@@ -473,7 +473,6 @@ public final class EmuSimulatorApp extends Application {
     clearIssuerTab();
     resetStepper();
     lastReport = null;
-    lastIssuerResult = null;
     lastReportPath = null;
     copyCliButton.setDisable(true);
     copySessionInfoButton.setDisable(true);
@@ -485,7 +484,7 @@ public final class EmuSimulatorApp extends Application {
     Path reportPath = buildReportPath(preset.getName());
 
     UiScenarioListener listener = new UiScenarioListener();
-    currentTask = runner.createTask(preset, options, reportPath, listener);
+    currentTask = runner.createTask(preset, options, reportPath, listener, lastIssuerResult);
     currentTask.setOnSucceeded(e -> handleCompletion(currentTask.getValue()));
     currentTask.setOnFailed(e -> handleFailure(preset.getName(), currentTask.getException()));
     currentTask.setOnCancelled(e -> {
