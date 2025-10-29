@@ -11,9 +11,15 @@ import java.util.List;
 
 final class AdvancedOptionsSnapshot {
 
+  private final String documentType;
   private final String documentNumber;
+  private final String issuingState;
+  private final String nationality;
+  private final String primaryIdentifier;
+  private final String secondaryIdentifier;
   private final String dateOfBirth;
   private final String dateOfExpiry;
+  private final String gender;
   private final String can;
   private final String pin;
   private final String puk;
@@ -32,9 +38,15 @@ final class AdvancedOptionsSnapshot {
   private final Boolean issuerOpenRead;
 
   AdvancedOptionsSnapshot(
+      String documentType,
       String documentNumber,
+      String issuingState,
+      String nationality,
+      String primaryIdentifier,
+      String secondaryIdentifier,
       String dateOfBirth,
       String dateOfExpiry,
+      String gender,
       String can,
       String pin,
       String puk,
@@ -51,9 +63,15 @@ final class AdvancedOptionsSnapshot {
       String issuerSignatureAlgorithm,
       List<String> issuerLifecycleTargets,
       Boolean issuerOpenRead) {
+    this.documentType = documentType;
     this.documentNumber = documentNumber;
+    this.issuingState = issuingState;
+    this.nationality = nationality;
+    this.primaryIdentifier = primaryIdentifier;
+    this.secondaryIdentifier = secondaryIdentifier;
     this.dateOfBirth = dateOfBirth;
     this.dateOfExpiry = dateOfExpiry;
+    this.gender = gender;
     this.can = can;
     this.pin = pin;
     this.puk = puk;
@@ -166,8 +184,28 @@ final class AdvancedOptionsSnapshot {
     return trustStorePath;
   }
 
+  String getDocumentType() {
+    return documentType;
+  }
+
   String getDocumentNumber() {
     return documentNumber;
+  }
+
+  String getIssuingState() {
+    return issuingState;
+  }
+
+  String getNationality() {
+    return nationality;
+  }
+
+  String getPrimaryIdentifier() {
+    return primaryIdentifier;
+  }
+
+  String getSecondaryIdentifier() {
+    return secondaryIdentifier;
   }
 
   String getDateOfBirth() {
@@ -176,6 +214,10 @@ final class AdvancedOptionsSnapshot {
 
   String getDateOfExpiry() {
     return dateOfExpiry;
+  }
+
+  String getGender() {
+    return gender;
   }
 
   String getCan() {

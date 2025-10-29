@@ -224,6 +224,8 @@ The JUnit suite provisions a fresh in-memory card for every test and verifies:
 
 The desktop runner now surfaces issuer-focused presets that drive the in-process `IssuerMain` helper before chaining into familiar read scenarios:
 
+- The **Advanced toggles** pane now exposes MRZ metadata controls for document type, issuing state, nationality, surname (primary identifier), given names (secondary identifier), and gender so you can override the defaults used by these presets without dropping to the CLI.
+
 - **Issuer: Full LDS** – seeds the emulator with the default DG set (DG1/DG2/DG3/DG4/DG14/DG15), exports `manifest.json`, EF binaries, and trust anchors to `target/ui-issuer/full/`, then performs a PACE→PA read to confirm integrity.
 - **Issuer: Minimal DG1/DG2** – disables DG3/DG4/DG14/DG15 to showcase a lean LDS; the manifest and `EF.COM.bin`/`EF.DG1.bin`/`EF.DG2.bin`/`EF.SOD.bin` land in `target/ui-issuer/minimal/` before a BAC/PA read validates the reduced dataset.
 - **Issuer: Corrupt DG2** – produces a tampered DG2 alongside `manifest.json` in `target/ui-issuer/corrupt/` so the follow-up read demonstrates PA failure reporting and artifact capture for negative drills.
