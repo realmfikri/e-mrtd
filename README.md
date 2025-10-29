@@ -173,6 +173,7 @@ Each run logs:
 - DG2 metadata (image size, MIME type, quality metrics).
 - Passive authentication results, including hash validation, signature verification, and trust chain status.
 - Session summary covering PACE attempts, BAC fallback decisions, chip authentication status, and terminal authentication results (including DG3/DG4 access).
+- The JavaFX UI includes a **Card vs Terminal** tab that contrasts issuer-provisioned MRZ and data-group hashes with the reader's secure-messaging state and passive-auth verdicts.
 
 ## 📁 Key Directories
 ```bash

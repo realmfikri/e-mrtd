@@ -36,6 +36,7 @@ import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 import javafx.util.Callback;
+import org.jmrtd.lds.icao.MRZInfo;
 
 import java.io.File;
 import java.io.IOException;
@@ -47,6 +48,8 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Objects;
@@ -74,6 +77,7 @@ public final class EmuSimulatorApp extends Application {
 
   private TabPane resultTabs;
   private Tab issuerTab;
+  private Tab cardDetailsTab;
   private final Label verdictValue = valueLabel();
   private final Label smModeValue = valueLabel();
   private final Label paceValue = valueLabel();
@@ -93,6 +97,41 @@ public final class EmuSimulatorApp extends Application {
   private final Label issuerFacePreviewPathValue = multilineValueLabel();
   private final ImageView issuerFacePreviewImage = new ImageView();
 
+  private final Label cardMrzDocumentNumberValue = valueLabel();
+  private final Label terminalMrzDocumentNumberValue = valueLabel();
+  private final Label cardMrzIssuingStateValue = valueLabel();
+  private final Label terminalMrzIssuingStateValue = valueLabel();
+  private final Label cardMrzNationalityValue = valueLabel();
+  private final Label terminalMrzNationalityValue = valueLabel();
+  private final Label cardMrzDateOfBirthValue = valueLabel();
+  private final Label terminalMrzDateOfBirthValue = valueLabel();
+  private final Label cardMrzDateOfExpiryValue = valueLabel();
+  private final Label terminalMrzDateOfExpiryValue = valueLabel();
+  private final Label cardMrzPrimaryIdentifierValue = multilineValueLabel();
+  private final Label terminalMrzPrimaryIdentifierValue = multilineValueLabel();
+  private final Label cardMrzSecondaryIdentifierValue = multilineValueLabel();
+  private final Label terminalMrzSecondaryIdentifierValue = multilineValueLabel();
+
+  private final Label cardTransportValue = valueLabel();
+  private final Label terminalTransportValue = valueLabel();
+  private final Label cardSecureMessagingModeValue = valueLabel();
+  private final Label terminalSecureMessagingModeValue = valueLabel();
+  private final Label cardPaceProfilesValue = multilineValueLabel();
+  private final Label terminalPaceStatusValue = valueLabel();
+  private final Label cardChipAuthProfileValue = valueLabel();
+  private final Label terminalChipAuthStatusValue = valueLabel();
+  private final Label cardActiveAuthProfileValue = valueLabel();
+  private final Label terminalActiveAuthStatusValue = valueLabel();
+
+  private final Label cardDigestAlgorithmValue = valueLabel();
+  private final Label terminalDigestAlgorithmValue = valueLabel();
+  private final Label cardProvisionedDataGroupsValue = multilineValueLabel();
+  private final Label terminalPaDataGroupsValue = multilineValueLabel();
+  private final Label cardPaSignerValue = valueLabel();
+  private final Label terminalPaSignerValue = multilineValueLabel();
+  private final Label cardPaChainValue = valueLabel();
+  private final Label terminalPaChainValue = multilineValueLabel();
+
   private final ListView<String> dgListView = new ListView<>();
   private final Label dg3ReadableValue = valueLabel();
   private final Label dg4ReadableValue = valueLabel();
@@ -106,6 +145,9 @@ public final class EmuSimulatorApp extends Application {
       SimPhase.COMPLETE);
 
   private static final int MAX_LOG_ENTRIES = 2000;
+  private static final String ISSUER_PLACEHOLDER = "(issuer not run)";
+  private static final String READER_PLACEHOLDER = "(reader not run)";
+  private static final String DG1_NOT_READ_PLACEHOLDER = "(DG1 not read)";
 
   private Task<ScenarioResult> currentTask;
   private List<String> lastCommands = List.of();
@@ -210,6 +252,9 @@ public final class EmuSimulatorApp extends Application {
     issuerTab = buildIssuerTab();
     resultTabs.getTabs().add(issuerTab);
     clearIssuerTab();
+    cardDetailsTab = buildCardDetailsTab();
+    resultTabs.getTabs().add(cardDetailsTab);
+    clearCardDetailsTab();
     resultTabs.getTabs().add(buildDataGroupsTab());
     resultTabs.getTabs().add(buildLogTab());
     resultTabs.getTabs().add(buildSecurityTab());
@@ -263,6 +308,49 @@ public final class EmuSimulatorApp extends Application {
 
     VBox container = new VBox(12, grid, facePreviewBox);
     Tab tab = new Tab("Issuer Output", container);
+    tab.setClosable(false);
+    tab.setDisable(true);
+    return tab;
+  }
+
+  private Tab buildCardDetailsTab() {
+    VBox container = new VBox(12);
+    container.setPadding(new Insets(16));
+
+    Label mrzHeader = new Label("MRZ (DG1)");
+    mrzHeader.getStyleClass().add("header-label");
+    GridPane mrzGrid = createComparisonGrid();
+    addComparisonHeaders(mrzGrid);
+    addComparisonRow(mrzGrid, 1, "Document number", cardMrzDocumentNumberValue, terminalMrzDocumentNumberValue);
+    addComparisonRow(mrzGrid, 2, "Issuing state", cardMrzIssuingStateValue, terminalMrzIssuingStateValue);
+    addComparisonRow(mrzGrid, 3, "Nationality", cardMrzNationalityValue, terminalMrzNationalityValue);
+    addComparisonRow(mrzGrid, 4, "Date of birth", cardMrzDateOfBirthValue, terminalMrzDateOfBirthValue);
+    addComparisonRow(mrzGrid, 5, "Date of expiry", cardMrzDateOfExpiryValue, terminalMrzDateOfExpiryValue);
+    addComparisonRow(mrzGrid, 6, "Primary identifier", cardMrzPrimaryIdentifierValue, terminalMrzPrimaryIdentifierValue);
+    addComparisonRow(mrzGrid, 7, "Secondary identifier", cardMrzSecondaryIdentifierValue, terminalMrzSecondaryIdentifierValue);
+
+    Label smHeader = new Label("Secure messaging & authentication");
+    smHeader.getStyleClass().add("header-label");
+    GridPane smGrid = createComparisonGrid();
+    addComparisonHeaders(smGrid);
+    addComparisonRow(smGrid, 1, "Transport", cardTransportValue, terminalTransportValue);
+    addComparisonRow(smGrid, 2, "Secure messaging", cardSecureMessagingModeValue, terminalSecureMessagingModeValue);
+    addComparisonRow(smGrid, 3, "PACE profiles / status", cardPaceProfilesValue, terminalPaceStatusValue);
+    addComparisonRow(smGrid, 4, "Chip Authentication", cardChipAuthProfileValue, terminalChipAuthStatusValue);
+    addComparisonRow(smGrid, 5, "Active Authentication", cardActiveAuthProfileValue, terminalActiveAuthStatusValue);
+
+    Label paHeader = new Label("Passive authentication & DG hashes");
+    paHeader.getStyleClass().add("header-label");
+    GridPane paGrid = createComparisonGrid();
+    addComparisonHeaders(paGrid);
+    addComparisonRow(paGrid, 1, "Digest algorithm", cardDigestAlgorithmValue, terminalDigestAlgorithmValue);
+    addComparisonRow(paGrid, 2, "Provisioned DG hashes", cardProvisionedDataGroupsValue, terminalPaDataGroupsValue);
+    addComparisonRow(paGrid, 3, "Signer", cardPaSignerValue, terminalPaSignerValue);
+    addComparisonRow(paGrid, 4, "Chain status", cardPaChainValue, terminalPaChainValue);
+
+    container.getChildren().addAll(mrzHeader, mrzGrid, smHeader, smGrid, paHeader, paGrid);
+
+    Tab tab = new Tab("Card vs Terminal", container);
     tab.setClosable(false);
     tab.setDisable(true);
     return tab;
@@ -575,6 +663,7 @@ public final class EmuSimulatorApp extends Application {
     lastReportPath = result.getReportPath();
     lastIssuerResult = result.getIssuerResult().orElse(null);
     updateIssuerTab(lastIssuerResult);
+    updateCardDetailsTab(null, lastIssuerResult);
 
     if (!result.isSuccess()) {
       String failureMsg = "Scenario failed";
@@ -600,6 +689,7 @@ public final class EmuSimulatorApp extends Application {
       if (viewData != null) {
         updateSummary(viewData);
         updateDataGroups(viewData);
+        updateCardDetailsTab(viewData, lastIssuerResult);
       }
       lastReport = report;
       exportButton.setDisable(false);
@@ -610,6 +700,7 @@ public final class EmuSimulatorApp extends Application {
         if (viewData != null) {
           updateSummary(viewData);
           updateDataGroups(viewData);
+          updateCardDetailsTab(viewData, lastIssuerResult);
           exportButton.setDisable(false);
           copySessionInfoButton.setDisable(false);
         } else {
@@ -640,6 +731,7 @@ public final class EmuSimulatorApp extends Application {
     copySessionInfoButton.setDisable(false);
     lastIssuerResult = null;
     clearIssuerTab();
+    clearCardDetailsTab();
     finishScenario();
   }
 
@@ -995,6 +1087,32 @@ public final class EmuSimulatorApp extends Application {
     grid.getChildren().addAll(label, value);
   }
 
+  private static GridPane createComparisonGrid() {
+    GridPane grid = new GridPane();
+    grid.setHgap(12);
+    grid.setVgap(8);
+    return grid;
+  }
+
+  private static void addComparisonHeaders(GridPane grid) {
+    Label fieldHeader = new Label("Field");
+    fieldHeader.getStyleClass().add("summary-label");
+    grid.add(fieldHeader, 0, 0);
+    Label cardHeader = new Label("On-card (Issuer)");
+    cardHeader.getStyleClass().add("summary-label");
+    grid.add(cardHeader, 1, 0);
+    Label terminalHeader = new Label("Terminal (Reader)");
+    terminalHeader.getStyleClass().add("summary-label");
+    grid.add(terminalHeader, 2, 0);
+  }
+
+  private static void addComparisonRow(GridPane grid, int row, String labelText, Label cardValue, Label terminalValue) {
+    Label label = new Label(labelText);
+    grid.add(label, 0, row);
+    grid.add(cardValue, 1, row);
+    grid.add(terminalValue, 2, row);
+  }
+
   private static Label valueLabel() {
     Label label = new Label("—");
     label.getStyleClass().add("value-label");
@@ -1035,6 +1153,49 @@ public final class EmuSimulatorApp extends Application {
     if (resultTabs != null && issuerTab != null
         && resultTabs.getSelectionModel().getSelectedItem() == issuerTab) {
       resultTabs.getSelectionModel().selectFirst();
+    }
+  }
+
+  private void clearCardDetailsTab() {
+    cardMrzDocumentNumberValue.setText(ISSUER_PLACEHOLDER);
+    cardMrzIssuingStateValue.setText(ISSUER_PLACEHOLDER);
+    cardMrzNationalityValue.setText(ISSUER_PLACEHOLDER);
+    cardMrzDateOfBirthValue.setText(ISSUER_PLACEHOLDER);
+    cardMrzDateOfExpiryValue.setText(ISSUER_PLACEHOLDER);
+    cardMrzPrimaryIdentifierValue.setText(ISSUER_PLACEHOLDER);
+    cardMrzSecondaryIdentifierValue.setText(ISSUER_PLACEHOLDER);
+    cardTransportValue.setText(ISSUER_PLACEHOLDER);
+    cardSecureMessagingModeValue.setText(ISSUER_PLACEHOLDER);
+    cardPaceProfilesValue.setText(ISSUER_PLACEHOLDER);
+    cardChipAuthProfileValue.setText(ISSUER_PLACEHOLDER);
+    cardActiveAuthProfileValue.setText(ISSUER_PLACEHOLDER);
+    cardDigestAlgorithmValue.setText(ISSUER_PLACEHOLDER);
+    cardProvisionedDataGroupsValue.setText(ISSUER_PLACEHOLDER);
+    cardPaSignerValue.setText(ISSUER_PLACEHOLDER);
+    cardPaChainValue.setText(ISSUER_PLACEHOLDER);
+
+    terminalMrzDocumentNumberValue.setText(READER_PLACEHOLDER);
+    terminalMrzIssuingStateValue.setText(READER_PLACEHOLDER);
+    terminalMrzNationalityValue.setText(READER_PLACEHOLDER);
+    terminalMrzDateOfBirthValue.setText(READER_PLACEHOLDER);
+    terminalMrzDateOfExpiryValue.setText(READER_PLACEHOLDER);
+    terminalMrzPrimaryIdentifierValue.setText(READER_PLACEHOLDER);
+    terminalMrzSecondaryIdentifierValue.setText(READER_PLACEHOLDER);
+    terminalTransportValue.setText(READER_PLACEHOLDER);
+    terminalSecureMessagingModeValue.setText(READER_PLACEHOLDER);
+    terminalPaceStatusValue.setText(READER_PLACEHOLDER);
+    terminalChipAuthStatusValue.setText(READER_PLACEHOLDER);
+    terminalActiveAuthStatusValue.setText(READER_PLACEHOLDER);
+    terminalDigestAlgorithmValue.setText(READER_PLACEHOLDER);
+    terminalPaDataGroupsValue.setText(READER_PLACEHOLDER);
+    terminalPaSignerValue.setText(READER_PLACEHOLDER);
+    terminalPaChainValue.setText(READER_PLACEHOLDER);
+
+    if (cardDetailsTab != null) {
+      cardDetailsTab.setDisable(true);
+      if (resultTabs != null && resultTabs.getSelectionModel().getSelectedItem() == cardDetailsTab) {
+        resultTabs.getSelectionModel().selectFirst();
+      }
     }
   }
 
@@ -1121,6 +1282,108 @@ public final class EmuSimulatorApp extends Application {
     }
   }
 
+  private void updateCardDetailsTab(SessionReportViewData readerData, IssuerSimulator.Result issuerResult) {
+    boolean hasIssuer = issuerResult != null;
+    if (hasIssuer) {
+      PersonalizationJob job = issuerResult.getJob();
+      MRZInfo mrz = job != null ? job.getMrzInfo() : null;
+      cardMrzDocumentNumberValue.setText(orDefault(mrz != null ? mrz.getDocumentNumber() : null));
+      cardMrzIssuingStateValue.setText(orDefault(mrz != null ? mrz.getIssuingState() : null));
+      cardMrzNationalityValue.setText(orDefault(mrz != null ? mrz.getNationality() : null));
+      cardMrzDateOfBirthValue.setText(orDefault(mrz != null ? mrz.getDateOfBirth() : null));
+      cardMrzDateOfExpiryValue.setText(orDefault(mrz != null ? mrz.getDateOfExpiry() : null));
+      cardMrzPrimaryIdentifierValue.setText(orDefault(mrz != null ? mrz.getPrimaryIdentifier() : null));
+      cardMrzSecondaryIdentifierValue.setText(orDefault(mrz != null ? mrz.getSecondaryIdentifier() : null));
+      cardTransportValue.setText("—");
+      cardSecureMessagingModeValue.setText("—");
+      cardPaceProfilesValue.setText(formatStringList(job.getPaceOids()));
+      cardChipAuthProfileValue.setText(orDefault(job.getChipAuthenticationCurve()));
+      cardActiveAuthProfileValue.setText(formatActiveAuthProfile(job));
+      cardDigestAlgorithmValue.setText(orDefault(job.getDigestAlgorithm()));
+      cardProvisionedDataGroupsValue.setText(formatDataGroupCollection(job.getEnabledDataGroups()));
+      cardPaSignerValue.setText("—");
+      cardPaChainValue.setText("—");
+    } else {
+      cardMrzDocumentNumberValue.setText(ISSUER_PLACEHOLDER);
+      cardMrzIssuingStateValue.setText(ISSUER_PLACEHOLDER);
+      cardMrzNationalityValue.setText(ISSUER_PLACEHOLDER);
+      cardMrzDateOfBirthValue.setText(ISSUER_PLACEHOLDER);
+      cardMrzDateOfExpiryValue.setText(ISSUER_PLACEHOLDER);
+      cardMrzPrimaryIdentifierValue.setText(ISSUER_PLACEHOLDER);
+      cardMrzSecondaryIdentifierValue.setText(ISSUER_PLACEHOLDER);
+      cardTransportValue.setText(ISSUER_PLACEHOLDER);
+      cardSecureMessagingModeValue.setText(ISSUER_PLACEHOLDER);
+      cardPaceProfilesValue.setText(ISSUER_PLACEHOLDER);
+      cardChipAuthProfileValue.setText(ISSUER_PLACEHOLDER);
+      cardActiveAuthProfileValue.setText(ISSUER_PLACEHOLDER);
+      cardDigestAlgorithmValue.setText(ISSUER_PLACEHOLDER);
+      cardProvisionedDataGroupsValue.setText(ISSUER_PLACEHOLDER);
+      cardPaSignerValue.setText(ISSUER_PLACEHOLDER);
+      cardPaChainValue.setText(ISSUER_PLACEHOLDER);
+    }
+
+    if (readerData != null) {
+      SessionReportViewData.MrzSummary mrz = readerData.getMrzSummary();
+      if (mrz != null) {
+        terminalMrzDocumentNumberValue.setText(orDefault(mrz.getDocumentNumber()));
+        terminalMrzIssuingStateValue.setText(orDefault(mrz.getIssuingState()));
+        terminalMrzNationalityValue.setText(orDefault(mrz.getNationality()));
+        terminalMrzDateOfBirthValue.setText(orDefault(mrz.getDateOfBirth()));
+        terminalMrzDateOfExpiryValue.setText(orDefault(mrz.getDateOfExpiry()));
+        terminalMrzPrimaryIdentifierValue.setText(orDefault(mrz.getPrimaryIdentifier()));
+        terminalMrzSecondaryIdentifierValue.setText(orDefault(mrz.getSecondaryIdentifier()));
+      } else {
+        terminalMrzDocumentNumberValue.setText(DG1_NOT_READ_PLACEHOLDER);
+        terminalMrzIssuingStateValue.setText(DG1_NOT_READ_PLACEHOLDER);
+        terminalMrzNationalityValue.setText(DG1_NOT_READ_PLACEHOLDER);
+        terminalMrzDateOfBirthValue.setText(DG1_NOT_READ_PLACEHOLDER);
+        terminalMrzDateOfExpiryValue.setText(DG1_NOT_READ_PLACEHOLDER);
+        terminalMrzPrimaryIdentifierValue.setText(DG1_NOT_READ_PLACEHOLDER);
+        terminalMrzSecondaryIdentifierValue.setText(DG1_NOT_READ_PLACEHOLDER);
+      }
+      terminalTransportValue.setText(orDefault(readerData.getTransport()));
+      terminalSecureMessagingModeValue.setText(orDefault(readerData.getSecureMessagingMode()));
+      terminalPaceStatusValue.setText(String.format("Attempted: %s | Established: %s",
+          yesNo(readerData.isPaceAttempted()), yesNo(readerData.isPaceEstablished())));
+      terminalChipAuthStatusValue.setText("Established: " + yesNo(readerData.isCaEstablished()));
+      terminalActiveAuthStatusValue.setText(buildActiveAuthSummary(readerData));
+      terminalDigestAlgorithmValue.setText(orDefault(readerData.getPassiveAuthAlgorithm()));
+      terminalPaDataGroupsValue.setText(String.format(
+          "OK: %s%nBad: %s%nMissing: %s%nLocked: %s",
+          formatDataGroupList(readerData.getPassiveAuthOkDataGroups()),
+          formatDataGroupList(readerData.getPassiveAuthBadDataGroups()),
+          formatDataGroupList(readerData.getPassiveAuthMissingDataGroups()),
+          formatDataGroupList(readerData.getPassiveAuthLockedDataGroups())));
+      terminalPaSignerValue.setText(orDefault(readerData.getPassiveAuthSigner()));
+      terminalPaChainValue.setText(orDefault(readerData.getPassiveAuthChainStatus()));
+    } else {
+      terminalMrzDocumentNumberValue.setText(READER_PLACEHOLDER);
+      terminalMrzIssuingStateValue.setText(READER_PLACEHOLDER);
+      terminalMrzNationalityValue.setText(READER_PLACEHOLDER);
+      terminalMrzDateOfBirthValue.setText(READER_PLACEHOLDER);
+      terminalMrzDateOfExpiryValue.setText(READER_PLACEHOLDER);
+      terminalMrzPrimaryIdentifierValue.setText(READER_PLACEHOLDER);
+      terminalMrzSecondaryIdentifierValue.setText(READER_PLACEHOLDER);
+      terminalTransportValue.setText(READER_PLACEHOLDER);
+      terminalSecureMessagingModeValue.setText(READER_PLACEHOLDER);
+      terminalPaceStatusValue.setText(READER_PLACEHOLDER);
+      terminalChipAuthStatusValue.setText(READER_PLACEHOLDER);
+      terminalActiveAuthStatusValue.setText(READER_PLACEHOLDER);
+      terminalDigestAlgorithmValue.setText(READER_PLACEHOLDER);
+      terminalPaDataGroupsValue.setText(READER_PLACEHOLDER);
+      terminalPaSignerValue.setText(READER_PLACEHOLDER);
+      terminalPaChainValue.setText(READER_PLACEHOLDER);
+    }
+
+    if (cardDetailsTab != null) {
+      boolean enable = hasIssuer || readerData != null;
+      cardDetailsTab.setDisable(!enable);
+      if (!enable && resultTabs != null && resultTabs.getSelectionModel().getSelectedItem() == cardDetailsTab) {
+        resultTabs.getSelectionModel().selectFirst();
+      }
+    }
+  }
+
   private void copyIssuerArtifacts(IssuerSimulator.Result issuerResult, Path targetDir) throws IOException {
     List<Path> sources = new ArrayList<>();
     Path manifest = issuerResult.getManifestPath();
@@ -1167,6 +1430,34 @@ public final class EmuSimulatorApp extends Application {
       return "(none)";
     }
     return String.join(", ", formatted);
+  }
+
+  private static String formatDataGroupCollection(Collection<Integer> dataGroups) {
+    if (dataGroups == null || dataGroups.isEmpty()) {
+      return "(none)";
+    }
+    List<Integer> sorted = new ArrayList<>();
+    for (Integer dg : dataGroups) {
+      if (dg != null) {
+        sorted.add(dg);
+      }
+    }
+    if (sorted.isEmpty()) {
+      return "(none)";
+    }
+    Collections.sort(sorted);
+    return formatDataGroupList(sorted);
+  }
+
+  private static String formatActiveAuthProfile(PersonalizationJob job) {
+    if (job == null) {
+      return "—";
+    }
+    int size = job.getAaKeySize();
+    if (size > 0) {
+      return size + "-bit key";
+    }
+    return "—";
   }
 
   private static final class BatchRunState {
