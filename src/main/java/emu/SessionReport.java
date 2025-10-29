@@ -191,6 +191,7 @@ public final class SessionReport {
     private boolean dg3Readable;
     private boolean dg4Readable;
     private Dg2Metadata dg2Metadata;
+    private MrzSummary dg1Mrz;
 
     public void addPresent(int dg) {
       if (!present.contains(dg)) {
@@ -216,6 +217,13 @@ public final class SessionReport {
       this.dg2Metadata = metadata;
     }
 
+    public void setDg1Mrz(MrzSummary mrz) {
+      this.dg1Mrz = mrz;
+      if (mrz != null) {
+        addPresent(1);
+      }
+    }
+
     public List<Integer> getPresent() {
       present.sort(Comparator.naturalOrder());
       return List.copyOf(present);
@@ -233,6 +241,10 @@ public final class SessionReport {
       return dg2Metadata;
     }
 
+    public MrzSummary getDg1Mrz() {
+      return dg1Mrz;
+    }
+
     String toJson(String indent) {
       present.sort(Comparator.naturalOrder());
       StringBuilder sb = new StringBuilder();
@@ -240,7 +252,25 @@ public final class SessionReport {
       sb.append("\"present\":").append(intList(present)).append(',');
       sb.append("\"dg3Readable\":").append(dg3Readable).append(',');
       sb.append("\"dg4Readable\":").append(dg4Readable).append(',');
+      sb.append("\"dg1\":").append(mrzToJson(dg1Mrz)).append(',');
       sb.append("\"dg2\":").append(dg2ToJson(dg2Metadata));
+      sb.append('}');
+      return sb.toString();
+    }
+
+    private String mrzToJson(MrzSummary mrz) {
+      if (mrz == null) {
+        return "null";
+      }
+      StringBuilder sb = new StringBuilder();
+      sb.append('{');
+      sb.append("\"documentNumber\":").append(toJsonString(mrz.documentNumber)).append(',');
+      sb.append("\"dateOfBirth\":").append(toJsonString(mrz.dateOfBirth)).append(',');
+      sb.append("\"dateOfExpiry\":").append(toJsonString(mrz.dateOfExpiry)).append(',');
+      sb.append("\"primaryIdentifier\":").append(toJsonString(mrz.primaryIdentifier)).append(',');
+      sb.append("\"secondaryIdentifier\":").append(toJsonString(mrz.secondaryIdentifier)).append(',');
+      sb.append("\"issuingState\":").append(toJsonString(mrz.issuingState)).append(',');
+      sb.append("\"nationality\":").append(toJsonString(mrz.nationality));
       sb.append('}');
       return sb.toString();
     }
@@ -302,6 +332,32 @@ public final class SessionReport {
       this.truncated = truncated;
       this.faces = faces;
       this.previewPath = previewPath;
+    }
+  }
+
+  public static final class MrzSummary {
+    public final String documentNumber;
+    public final String dateOfBirth;
+    public final String dateOfExpiry;
+    public final String primaryIdentifier;
+    public final String secondaryIdentifier;
+    public final String issuingState;
+    public final String nationality;
+
+    public MrzSummary(String documentNumber,
+                      String dateOfBirth,
+                      String dateOfExpiry,
+                      String primaryIdentifier,
+                      String secondaryIdentifier,
+                      String issuingState,
+                      String nationality) {
+      this.documentNumber = documentNumber;
+      this.dateOfBirth = dateOfBirth;
+      this.dateOfExpiry = dateOfExpiry;
+      this.primaryIdentifier = primaryIdentifier;
+      this.secondaryIdentifier = secondaryIdentifier;
+      this.issuingState = issuingState;
+      this.nationality = nationality;
     }
   }
 

@@ -15,6 +15,13 @@ final class SessionReportViewData {
   private final String activeAuthAlgorithm;
   private final String passiveAuthVerdict;
   private final String passiveAuthAlgorithm;
+  private final List<Integer> passiveAuthOkDataGroups;
+  private final List<Integer> passiveAuthBadDataGroups;
+  private final List<Integer> passiveAuthMissingDataGroups;
+  private final List<Integer> passiveAuthLockedDataGroups;
+  private final String passiveAuthSigner;
+  private final String passiveAuthChainStatus;
+  private final MrzSummary mrzSummary;
   private final List<Integer> presentDataGroups;
   private final boolean dg3Readable;
   private final boolean dg4Readable;
@@ -31,6 +38,13 @@ final class SessionReportViewData {
       String activeAuthAlgorithm,
       String passiveAuthVerdict,
       String passiveAuthAlgorithm,
+      List<Integer> passiveAuthOkDataGroups,
+      List<Integer> passiveAuthBadDataGroups,
+      List<Integer> passiveAuthMissingDataGroups,
+      List<Integer> passiveAuthLockedDataGroups,
+      String passiveAuthSigner,
+      String passiveAuthChainStatus,
+      MrzSummary mrzSummary,
       List<Integer> presentDataGroups,
       boolean dg3Readable,
       boolean dg4Readable) {
@@ -45,6 +59,13 @@ final class SessionReportViewData {
     this.activeAuthAlgorithm = activeAuthAlgorithm;
     this.passiveAuthVerdict = passiveAuthVerdict;
     this.passiveAuthAlgorithm = passiveAuthAlgorithm;
+    this.passiveAuthOkDataGroups = List.copyOf(passiveAuthOkDataGroups);
+    this.passiveAuthBadDataGroups = List.copyOf(passiveAuthBadDataGroups);
+    this.passiveAuthMissingDataGroups = List.copyOf(passiveAuthMissingDataGroups);
+    this.passiveAuthLockedDataGroups = List.copyOf(passiveAuthLockedDataGroups);
+    this.passiveAuthSigner = passiveAuthSigner;
+    this.passiveAuthChainStatus = passiveAuthChainStatus;
+    this.mrzSummary = mrzSummary;
     this.presentDataGroups = List.copyOf(presentDataGroups);
     this.dg3Readable = dg3Readable;
     this.dg4Readable = dg4Readable;
@@ -94,6 +115,34 @@ final class SessionReportViewData {
     return passiveAuthAlgorithm;
   }
 
+  List<Integer> getPassiveAuthOkDataGroups() {
+    return passiveAuthOkDataGroups;
+  }
+
+  List<Integer> getPassiveAuthBadDataGroups() {
+    return passiveAuthBadDataGroups;
+  }
+
+  List<Integer> getPassiveAuthMissingDataGroups() {
+    return passiveAuthMissingDataGroups;
+  }
+
+  List<Integer> getPassiveAuthLockedDataGroups() {
+    return passiveAuthLockedDataGroups;
+  }
+
+  String getPassiveAuthSigner() {
+    return passiveAuthSigner;
+  }
+
+  String getPassiveAuthChainStatus() {
+    return passiveAuthChainStatus;
+  }
+
+  MrzSummary getMrzSummary() {
+    return mrzSummary;
+  }
+
   List<Integer> getPresentDataGroups() {
     return presentDataGroups;
   }
@@ -104,6 +153,60 @@ final class SessionReportViewData {
 
   boolean isDg4Readable() {
     return dg4Readable;
+  }
+
+  static final class MrzSummary {
+    private final String documentNumber;
+    private final String dateOfBirth;
+    private final String dateOfExpiry;
+    private final String primaryIdentifier;
+    private final String secondaryIdentifier;
+    private final String issuingState;
+    private final String nationality;
+
+    MrzSummary(String documentNumber,
+               String dateOfBirth,
+               String dateOfExpiry,
+               String primaryIdentifier,
+               String secondaryIdentifier,
+               String issuingState,
+               String nationality) {
+      this.documentNumber = documentNumber;
+      this.dateOfBirth = dateOfBirth;
+      this.dateOfExpiry = dateOfExpiry;
+      this.primaryIdentifier = primaryIdentifier;
+      this.secondaryIdentifier = secondaryIdentifier;
+      this.issuingState = issuingState;
+      this.nationality = nationality;
+    }
+
+    String getDocumentNumber() {
+      return documentNumber;
+    }
+
+    String getDateOfBirth() {
+      return dateOfBirth;
+    }
+
+    String getDateOfExpiry() {
+      return dateOfExpiry;
+    }
+
+    String getPrimaryIdentifier() {
+      return primaryIdentifier;
+    }
+
+    String getSecondaryIdentifier() {
+      return secondaryIdentifier;
+    }
+
+    String getIssuingState() {
+      return issuingState;
+    }
+
+    String getNationality() {
+      return nationality;
+    }
   }
 }
 

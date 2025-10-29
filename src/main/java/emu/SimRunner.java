@@ -323,6 +323,14 @@ public final class SimRunner {
       System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
       System.out.println("Gender: " + info.getGender()); // jmrtd 0.8.x
       report.dataGroups.addPresent(1);
+      report.dataGroups.setDg1Mrz(new SessionReport.MrzSummary(
+          info.getDocumentNumber(),
+          info.getDateOfBirth(),
+          info.getDateOfExpiry(),
+          info.getPrimaryIdentifier(),
+          info.getSecondaryIdentifier(),
+          info.getIssuingState(),
+          info.getNationality()));
     }
 
     sink.onPhase(SimPhase.VERIFYING, "Validating Passive/Active/Terminal auth");
