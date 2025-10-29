@@ -185,6 +185,15 @@ public final class ReadDG1Main {
     }
     if (facePreviewDir != null) {
       builder.facePreviewDirectory(facePreviewDir);
+    } else if (jsonOutPath != null) {
+      Path parent = jsonOutPath.toAbsolutePath().getParent();
+      if (parent != null) {
+        builder.facePreviewDirectory(parent.resolve("faces"));
+      } else {
+        builder.facePreviewDirectory(Paths.get("target", "faces"));
+      }
+    } else {
+      builder.facePreviewDirectory(Paths.get("target", "faces"));
     }
     if (openComSodReads != null) {
       builder.openComSodReads(openComSodReads);

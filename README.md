@@ -140,6 +140,7 @@ mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main \
   bundles.
 - The run now prints a transition log whenever secure messaging upgrades (BAC → PACE → CA) plus a final summary line showing the
   active mode.
+- DG2 portrait previews are exported alongside the report under `<out-dir>/faces` (or `target/faces` when no `--out` is provided). The **Card vs Terminal** tab now loads these images lazily, surfacing the issuer portrait (from the personalization run or the session report metadata) next to the terminal capture with inline error reporting if a preview is missing.
 
 ### BAC Fallback after Incorrect CAN
 ```bash
@@ -183,6 +184,7 @@ Each run logs:
 - Passive authentication results, including hash validation, signature verification, and trust chain status.
 - Session summary covering PACE attempts, BAC fallback decisions, chip authentication status, and terminal authentication results (including DG3/DG4 access).
 - The JavaFX UI includes a **Card vs Terminal** tab that contrasts issuer-provisioned MRZ and data-group hashes with the reader's secure-messaging state and passive-auth verdicts.
+- Portrait previews from both the issuer artifacts and the reader's DG2 capture now appear side-by-side in that tab when biometric data is present, loading on demand with inline error reporting if assets go missing.
 
 ## 📁 Key Directories
 ```bash

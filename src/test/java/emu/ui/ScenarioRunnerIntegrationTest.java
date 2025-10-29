@@ -100,6 +100,15 @@ class ScenarioRunnerIntegrationTest {
     assertNotNull(dg2Metadata, "DG2 metadata should be present in the report");
     assertEquals(issuedDg2.length, dg2Metadata.length, "DG2 byte length must align with issuer artifact");
     assertFalse(dg2Metadata.faces.isEmpty(), "DG2 metadata should describe face imagery");
+    assertNotNull(dg2Metadata.previewPath, "DG2 preview path should be captured");
+    assertTrue(Files.exists(Path.of(dg2Metadata.previewPath)), "DG2 preview file should exist on disk");
+    issuerResult.getFacePreviewPath().ifPresent(path -> {
+      assertNotNull(dg2Metadata.issuerPreviewPath, "Issuer preview path should be captured when issuer artifacts are reused");
+      assertEquals(path.toAbsolutePath().toString(), dg2Metadata.issuerPreviewPath);
+      assertTrue(
+          Files.exists(Path.of(dg2Metadata.issuerPreviewPath)),
+          "Issuer preview file should exist on disk");
+    });
 
     try (ByteArrayInputStream in = new ByteArrayInputStream(issuedDg2)) {
       DG2File issuerDg2 = new DG2File(in);

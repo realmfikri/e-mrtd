@@ -18,6 +18,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PersonalizationSupportTest {
 
+  static {
+    System.setProperty("java.awt.headless", "true");
+  }
+
   @Test
   void excludingDataGroupRemovesItFromComAndSodMap() throws Exception {
     PersonalizationJob job = baseJobBuilder()
