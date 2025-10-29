@@ -327,14 +327,32 @@ final class ScenarioRunner {
 
   private List<String> buildIssuerAdvancedArgs(AdvancedOptionsSnapshot options) {
     List<String> args = new ArrayList<>();
+    if (hasText(options.getDocumentType())) {
+      args.add("--document-type=" + options.getDocumentType());
+    }
     if (hasText(options.getDocumentNumber())) {
       args.add("--doc-number=" + options.getDocumentNumber());
+    }
+    if (hasText(options.getIssuingState())) {
+      args.add("--issuing-state=" + options.getIssuingState());
+    }
+    if (hasText(options.getNationality())) {
+      args.add("--nationality=" + options.getNationality());
+    }
+    if (hasText(options.getPrimaryIdentifier())) {
+      args.add("--primary-id=" + options.getPrimaryIdentifier());
+    }
+    if (hasText(options.getSecondaryIdentifier())) {
+      args.add("--secondary-id=" + options.getSecondaryIdentifier());
     }
     if (hasText(options.getDateOfBirth())) {
       args.add("--date-of-birth=" + options.getDateOfBirth());
     }
     if (hasText(options.getDateOfExpiry())) {
       args.add("--date-of-expiry=" + options.getDateOfExpiry());
+    }
+    if (hasText(options.getGender())) {
+      args.add("--gender=" + options.getGender());
     }
     if (hasText(options.getCan())) {
       args.add("--pace-can=" + options.getCan());

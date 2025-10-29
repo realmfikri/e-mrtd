@@ -25,3 +25,5 @@ The table below captures the curated scenario presets and the CLI invocations th
 | JSON Report Export | `ReadDG1Main --seed` |
 
 > **Note:** The UI automatically injects `--out` for every `ReadDG1Main` invocation so it can display the generated report. Advanced options in the UI append additional CLI arguments on top of the preset defaults.
+
+> **MRZ overrides:** Use the Advanced toggles pane to customise the document type, issuing state, nationality, surname (primary identifier), given names (secondary identifier), and gender when running issuer presets so their personalization inputs match your scenario.

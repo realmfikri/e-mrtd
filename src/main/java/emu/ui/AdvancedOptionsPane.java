@@ -32,9 +32,15 @@ final class AdvancedOptionsPane extends TitledPane {
   private static final Set<Integer> DEFAULT_ISSUER_DATA_GROUPS = PersonalizationJob.defaultEnabledDataGroups();
   private static final List<String> DEFAULT_LIFECYCLE_TARGETS = PersonalizationJob.defaultLifecycleTargets();
 
+  private final ComboBox<String> documentTypeBox = new ComboBox<>();
   private final TextField docNumberField = new TextField();
+  private final TextField issuingStateField = new TextField();
+  private final TextField nationalityField = new TextField();
+  private final TextField primaryIdentifierField = new TextField();
+  private final TextField secondaryIdentifierField = new TextField();
   private final TextField dobField = new TextField();
   private final TextField doeField = new TextField();
+  private final ComboBox<String> genderBox = new ComboBox<>();
 
   private final TextField canField = new TextField();
   private final TextField pinField = new TextField();
@@ -101,9 +107,15 @@ final class AdvancedOptionsPane extends TitledPane {
     }
 
     return new AdvancedOptionsSnapshot(
+        comboValue(documentTypeBox),
         trimmed(docNumberField.getText()),
+        trimmed(issuingStateField.getText()),
+        trimmed(nationalityField.getText()),
+        trimmed(primaryIdentifierField.getText()),
+        trimmed(secondaryIdentifierField.getText()),
         trimmed(dobField.getText()),
         trimmed(doeField.getText()),
+        comboValue(genderBox),
         trimmed(canField.getText()),
         trimmed(pinField.getText()),
         trimmed(pukField.getText()),
@@ -123,13 +135,27 @@ final class AdvancedOptionsPane extends TitledPane {
   }
 
   private Node buildMrzSection() {
+    documentTypeBox.setEditable(true);
+    documentTypeBox.getItems().setAll("P<", "ID", "V<", "AC", "C<");
+    documentTypeBox.setPromptText("Default (P<)");
+
+    genderBox.setEditable(true);
+    genderBox.getItems().setAll("M", "F", "X", "U");
+    genderBox.setPromptText("Default (unspecified)");
+
     GridPane grid = new GridPane();
     grid.setHgap(8);
     grid.setVgap(6);
 
-    addRow(grid, 0, new Label("MRZ Document #"), docNumberField);
-    addRow(grid, 1, new Label("Date of Birth (YYMMDD)"), dobField);
-    addRow(grid, 2, new Label("Date of Expiry (YYMMDD)"), doeField);
+    addRow(grid, 0, new Label("Document Type"), documentTypeBox);
+    addRow(grid, 1, new Label("MRZ Document #"), docNumberField);
+    addRow(grid, 2, new Label("Issuing State"), issuingStateField);
+    addRow(grid, 3, new Label("Nationality"), nationalityField);
+    addRow(grid, 4, new Label("Surname (Primary ID)"), primaryIdentifierField);
+    addRow(grid, 5, new Label("Given Names (Secondary ID)"), secondaryIdentifierField);
+    addRow(grid, 6, new Label("Date of Birth (YYMMDD)"), dobField);
+    addRow(grid, 7, new Label("Date of Expiry (YYMMDD)"), doeField);
+    addRow(grid, 8, new Label("Gender"), genderBox);
 
     VBox box = new VBox(6);
     Label title = new Label("MRZ inputs");
@@ -264,6 +290,18 @@ final class AdvancedOptionsPane extends TitledPane {
 
   private static String trimmed(String value) {
     return value == null ? null : value.trim();
+  }
+
+  private String comboValue(ComboBox<String> box) {
+    String value = box.getValue();
+    if (value == null && box.isEditable()) {
+      value = box.getEditor().getText();
+    }
+    value = trimmed(value);
+    if (value == null || value.isEmpty()) {
+      return null;
+    }
+    return value;
   }
 
   private String pacePreferenceValue() {
