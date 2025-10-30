@@ -20,7 +20,6 @@ public final class SimConfig {
   public final String trustStorePassword;
   public final boolean requirePa;
   public final boolean requireAa;
-  public final boolean requireCa;
   public final List<Path> taCvcPaths;
   public final Path taKeyPath;
   public final String docNumber;
@@ -48,7 +47,6 @@ public final class SimConfig {
     this.trustStorePassword = builder.trustStorePassword;
     this.requirePa = builder.requirePa;
     this.requireAa = builder.requireAa;
-    this.requireCa = builder.requireCa;
     this.taCvcPaths = List.copyOf(builder.taCvcPaths);
     this.taKeyPath = builder.taKeyPath;
     this.docNumber = builder.docNumber;
@@ -78,7 +76,6 @@ public final class SimConfig {
     builder.trustStorePassword = trustStorePassword;
     builder.requirePa = requirePa;
     builder.requireAa = requireAa;
-    builder.requireCa = requireCa;
     builder.taCvcPaths = new ArrayList<>(taCvcPaths);
     builder.taKeyPath = taKeyPath;
     builder.docNumber = docNumber;
@@ -108,7 +105,6 @@ public final class SimConfig {
     String trustStorePassword;
     boolean requirePa;
     boolean requireAa;
-    boolean requireCa;
     List<Path> taCvcPaths = new ArrayList<>();
     Path taKeyPath;
     String docNumber;
@@ -179,11 +175,6 @@ public final class SimConfig {
 
     public Builder requireAa(boolean value) {
       this.requireAa = value;
-      return this;
-    }
-
-    public Builder requireCa(boolean value) {
-      this.requireCa = value;
       return this;
     }
 
