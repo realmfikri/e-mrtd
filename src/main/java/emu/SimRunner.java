@@ -771,13 +771,10 @@ public final class SimRunner {
         notAfter);
 
     CVCertificate certificate = new CVCertificate(body);
-    Signature signature = Signature.getInstance("SHA1withRSA");
-    signature.initSign(cvcaKeyPair.getPrivate());
-    signature.update(certificate.getTBS());
-    certificate.setSignature(signature.sign());
-
-    byte[] cvcBytes = certificate.getDEREncoded();
-    System.out.printf("Generated CVCA certificate: %d bytes (APDU limit: 255)%n", cvcBytes.length);
+    // For root certificate installation, send only the TBS (to-be-signed) body
+    // The applet parseCertificate with root=true expects just the body without signature
+    byte[] cvcBytes = certificate.getTBS();
+    System.out.printf("Generated CVCA certificate body (TBS): %d bytes (APDU limit: 255)%n", cvcBytes.length);
     if (cvcBytes.length > 255) {
       throw new RuntimeException(String.format(
           "CVCA certificate too large (%d bytes) for standard APDU (max 255 bytes). PUT DATA doesn't support chaining.",
