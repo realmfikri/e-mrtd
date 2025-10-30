@@ -368,6 +368,7 @@ public final class SimRunner {
           terminalAuthOutcome.dg3AllowedByRights,
           terminalAuthOutcome.dg4AllowedByRights));
     }
+    report.setTerminalAuthentication(terminalAuthOutcome.report);
     report.dataGroups.setDg3Readable(terminalAuthOutcome.dg3Readable);
     report.dataGroups.setDg4Readable(terminalAuthOutcome.dg4Readable);
 
@@ -1490,15 +1491,15 @@ public final class SimRunner {
 
     if (cvcBundles == null || cvcBundles.isEmpty()) {
       securityPrintln("Terminal Authentication skipped: provide at least one --ta-cvc file.");
-      return outcome;
+      return finalizeTerminalAuthOutcome(outcome);
     }
     if (chipOutcome == null || chipOutcome.result == null) {
       securityPrintln("Terminal Authentication skipped: Chip Authentication was not established.");
-      return outcome;
+      return finalizeTerminalAuthOutcome(outcome);
     }
     if (taKeyPath == null) {
       securityPrintln("Terminal Authentication skipped: --ta-key not provided.");
-      return outcome;
+      return finalizeTerminalAuthOutcome(outcome);
     }
 
     List<CardVerifiableCertificate> certificateChain = new ArrayList<>();
@@ -1508,14 +1509,14 @@ public final class SimRunner {
             bundle.path,
             bundle.error.getMessage() != null ? bundle.error.getMessage() : "unknown error"));
         outcome.failure = bundle.error;
-        return outcome;
+        return finalizeTerminalAuthOutcome(outcome);
       }
       if (bundle.cardCertificate == null) {
         securityPrintln(String.format(
             "  %s → parsed certificate but could not build CardVerifiableCertificate.",
             bundle.path));
         outcome.failure = new IllegalStateException("Unable to build CVC certificate wrapper");
-        return outcome;
+        return finalizeTerminalAuthOutcome(outcome);
       }
       certificateChain.add(bundle.cardCertificate);
     }
@@ -1528,6 +1529,9 @@ public final class SimRunner {
       outcome.terminalRights = chainValidation.terminalRights;
       outcome.dg3AllowedByRights = allowsDataGroup(chainValidation.terminalRights, 3);
       outcome.dg4AllowedByRights = allowsDataGroup(chainValidation.terminalRights, 4);
+      if (chainValidation.warnings != null) {
+        outcome.warnings.addAll(chainValidation.warnings);
+      }
     }
 
     PrivateKey terminalKey;
@@ -1536,7 +1540,7 @@ public final class SimRunner {
     } catch (Exception e) {
       securityPrintln("Terminal Authentication skipped: unable to load terminal private key (" + e.getMessage() + ").");
       outcome.failure = e;
-      return outcome;
+      return finalizeTerminalAuthOutcome(outcome);
     }
 
     outcome.attempted = true;
@@ -1546,35 +1550,53 @@ public final class SimRunner {
       if (paceResult != null) {
         taResult = svc.doEACTA(null, certificateChain, terminalKey, null, chipOutcome.result, paceResult);
       } else {
-      taResult = svc.doEACTA(null, certificateChain, terminalKey, null, chipOutcome.result, documentNumber);
+        taResult = svc.doEACTA(null, certificateChain, terminalKey, null, chipOutcome.result, documentNumber);
+      }
+      outcome.succeeded = taResult != null;
+      if (outcome.succeeded) {
+        securityPrintln("Terminal Authentication handshake completed.");
+      } else {
+        securityPrintln("Terminal Authentication did not return a success indicator.");
+      }
+    } catch (Exception e) {
+      outcome.failure = e;
+      securityPrintln("Terminal Authentication failed: " + e.getMessage());
     }
-    outcome.succeeded = taResult != null;
-    if (outcome.succeeded) {
-      securityPrintln("Terminal Authentication handshake completed.");
-    } else {
-      securityPrintln("Terminal Authentication did not return a success indicator.");
+
+    outcome.dg3Readable = attemptDataGroupRead(svc, PassportService.EF_DG3, "DG3");
+    outcome.dg4Readable = attemptDataGroupRead(svc, PassportService.EF_DG4, "DG4");
+    if (outcome.terminalRights != null) {
+      if (outcome.dg3AllowedByRights && !outcome.dg3Readable) {
+        securityPrintln("DG3 read denied despite terminal rights including DG3 access.");
+        outcome.warnings.add("DG3 read denied despite terminal rights including DG3 access.");
+      }
+      if (!outcome.dg3AllowedByRights && outcome.dg3Readable) {
+        securityPrintln("DG3 read succeeded even though terminal rights do not include DG3.");
+        outcome.warnings.add("DG3 read succeeded even though terminal rights do not include DG3.");
+      }
+      if (outcome.dg4AllowedByRights && !outcome.dg4Readable) {
+        securityPrintln("DG4 read denied despite terminal rights including DG4 access.");
+        outcome.warnings.add("DG4 read denied despite terminal rights including DG4 access.");
+      }
+      if (!outcome.dg4AllowedByRights && outcome.dg4Readable) {
+        securityPrintln("DG4 read succeeded even though terminal rights do not include DG4.");
+        outcome.warnings.add("DG4 read succeeded even though terminal rights do not include DG4.");
+      }
     }
-  } catch (Exception e) {
-    outcome.failure = e;
-    securityPrintln("Terminal Authentication failed: " + e.getMessage());
+    return finalizeTerminalAuthOutcome(outcome);
   }
 
-  outcome.dg3Readable = attemptDataGroupRead(svc, PassportService.EF_DG3, "DG3");
-  outcome.dg4Readable = attemptDataGroupRead(svc, PassportService.EF_DG4, "DG4");
-  if (outcome.terminalRights != null) {
-    if (outcome.dg3AllowedByRights && !outcome.dg3Readable) {
-      securityPrintln("DG3 read denied despite terminal rights including DG3 access.");
+  private static TerminalAuthOutcome finalizeTerminalAuthOutcome(TerminalAuthOutcome outcome) {
+    if (outcome.report == null) {
+      outcome.report = SessionReport.TerminalAuth.fromOutcome(
+          outcome.attempted,
+          outcome.succeeded,
+          outcome.dg3Readable,
+          outcome.dg4Readable,
+          outcome.terminalRole != null ? outcome.terminalRole.name() : null,
+          outcome.terminalRights != null ? outcome.terminalRights.name() : null,
+          outcome.warnings);
     }
-    if (!outcome.dg3AllowedByRights && outcome.dg3Readable) {
-      securityPrintln("DG3 read succeeded even though terminal rights do not include DG3.");
-    }
-    if (outcome.dg4AllowedByRights && !outcome.dg4Readable) {
-      securityPrintln("DG4 read denied despite terminal rights including DG4 access.");
-    }
-    if (!outcome.dg4AllowedByRights && outcome.dg4Readable) {
-      securityPrintln("DG4 read succeeded even though terminal rights do not include DG4.");
-    }
-  }
     return outcome;
   }
 
@@ -1976,6 +1998,8 @@ public final class SimRunner {
     AccessRightEnum terminalRights;
     boolean dg3AllowedByRights;
     boolean dg4AllowedByRights;
+    final List<String> warnings = new ArrayList<>();
+    SessionReport.TerminalAuth report;
   }
 
   private static final class SimOutputRouter extends OutputStream {

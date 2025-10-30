@@ -27,6 +27,13 @@ final class SessionReportViewData {
   private final boolean dg4Readable;
   private final String dg2PreviewPath;
   private final String issuerPreviewPath;
+  private final boolean terminalAuthAttempted;
+  private final boolean terminalAuthSucceeded;
+  private final boolean terminalAuthDg3Unlocked;
+  private final boolean terminalAuthDg4Unlocked;
+  private final String terminalAuthRole;
+  private final String terminalAuthRights;
+  private final List<String> terminalAuthWarnings;
 
   SessionReportViewData(
       String transport,
@@ -51,7 +58,14 @@ final class SessionReportViewData {
       boolean dg3Readable,
       boolean dg4Readable,
       String dg2PreviewPath,
-      String issuerPreviewPath) {
+      String issuerPreviewPath,
+      boolean terminalAuthAttempted,
+      boolean terminalAuthSucceeded,
+      boolean terminalAuthDg3Unlocked,
+      boolean terminalAuthDg4Unlocked,
+      String terminalAuthRole,
+      String terminalAuthRights,
+      List<String> terminalAuthWarnings) {
     this.transport = transport;
     this.secureMessagingMode = secureMessagingMode;
     this.paceAttempted = paceAttempted;
@@ -75,6 +89,13 @@ final class SessionReportViewData {
     this.dg4Readable = dg4Readable;
     this.dg2PreviewPath = dg2PreviewPath;
     this.issuerPreviewPath = issuerPreviewPath;
+    this.terminalAuthAttempted = terminalAuthAttempted;
+    this.terminalAuthSucceeded = terminalAuthSucceeded;
+    this.terminalAuthDg3Unlocked = terminalAuthDg3Unlocked;
+    this.terminalAuthDg4Unlocked = terminalAuthDg4Unlocked;
+    this.terminalAuthRole = terminalAuthRole;
+    this.terminalAuthRights = terminalAuthRights;
+    this.terminalAuthWarnings = List.copyOf(terminalAuthWarnings);
   }
 
   String getTransport() {
@@ -167,6 +188,34 @@ final class SessionReportViewData {
 
   String getIssuerPreviewPath() {
     return issuerPreviewPath;
+  }
+
+  boolean isTerminalAuthAttempted() {
+    return terminalAuthAttempted;
+  }
+
+  boolean isTerminalAuthSucceeded() {
+    return terminalAuthSucceeded;
+  }
+
+  boolean isTerminalAuthDg3Unlocked() {
+    return terminalAuthDg3Unlocked;
+  }
+
+  boolean isTerminalAuthDg4Unlocked() {
+    return terminalAuthDg4Unlocked;
+  }
+
+  String getTerminalAuthRole() {
+    return terminalAuthRole;
+  }
+
+  String getTerminalAuthRights() {
+    return terminalAuthRights;
+  }
+
+  List<String> getTerminalAuthWarnings() {
+    return terminalAuthWarnings;
   }
 
   static final class MrzSummary {
