@@ -79,7 +79,14 @@ class EmuSimulatorAppCardDetailsTest {
         false,
         false,
         preview.toString(),
-        null);
+        null,
+        false,
+        false,
+        false,
+        false,
+        null,
+        null,
+        List.of());
 
     EmuSimulatorApp app = new EmuSimulatorApp();
 
@@ -161,7 +168,14 @@ class EmuSimulatorAppCardDetailsTest {
         false,
         false,
         null,
-        preview.toString());
+        preview.toString(),
+        false,
+        false,
+        false,
+        false,
+        null,
+        null,
+        List.of());
 
     EmuSimulatorApp app = new EmuSimulatorApp();
 

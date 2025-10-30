@@ -85,6 +85,7 @@ public final class EmuSimulatorApp extends Application {
   private final Label paceValue = valueLabel();
   private final Label caValue = valueLabel();
   private final Label aaValue = valueLabel();
+  private final Label terminalAuthValue = valueLabel();
 
   private final Label issuerOutputDirectoryValue = multilineValueLabel();
   private final Label issuerManifestValue = multilineValueLabel();
@@ -276,6 +277,7 @@ public final class EmuSimulatorApp extends Application {
     addSummaryRow(grid, 2, "PACE", paceValue);
     addSummaryRow(grid, 3, "Chip Authentication", caValue);
     addSummaryRow(grid, 4, "Active Authentication", aaValue);
+    addSummaryRow(grid, 5, "Terminal Authentication", terminalAuthValue);
 
     Tab tab = new Tab("Summary", grid);
     tab.setClosable(false);
@@ -832,6 +834,7 @@ public final class EmuSimulatorApp extends Application {
         yesNo(data.isPaceAttempted()), yesNo(data.isPaceEstablished())));
     caValue.setText("Established: " + yesNo(data.isCaEstablished()));
     aaValue.setText(buildActiveAuthSummary(data));
+    terminalAuthValue.setText(buildTerminalAuthSummary(data));
   }
 
   private void updateDataGroups(SessionReportViewData data) {
@@ -850,6 +853,7 @@ public final class EmuSimulatorApp extends Application {
     paceValue.setText("—");
     caValue.setText("—");
     aaValue.setText("—");
+    terminalAuthValue.setText("—");
   }
 
   private void clearDataGroups() {
@@ -937,7 +941,9 @@ public final class EmuSimulatorApp extends Application {
     sb.append(levelOne).append("Secure messaging: ").append(smModeValue.getText()).append(newline);
     sb.append(levelOne).append("PACE: ").append(paceValue.getText()).append(newline);
     sb.append(levelOne).append("Chip Authentication: ").append(caValue.getText()).append(newline);
-    sb.append(levelOne).append("Active Authentication: ").append(aaValue.getText()).append(newline).append(newline);
+    sb.append(levelOne).append("Active Authentication: ").append(aaValue.getText()).append(newline);
+    sb.append(levelOne).append("Terminal Authentication: ").append(terminalAuthValue.getText())
+        .append(newline).append(newline);
 
     sb.append(baseIndent).append("Data Groups").append(newline);
     if (dgListView.getItems().isEmpty()) {
@@ -1037,6 +1043,56 @@ public final class EmuSimulatorApp extends Application {
         yesNo(data.isActiveAuthSupported()),
         yesNo(data.isActiveAuthVerified()),
         orDefault(data.getActiveAuthAlgorithm()));
+  }
+
+  private String buildTerminalAuthSummary(SessionReportViewData data) {
+    if (data == null) {
+      return "—";
+    }
+    String rightsSummary = formatTerminalAuthRights(data.getTerminalAuthRole(), data.getTerminalAuthRights());
+    String warningsSummary = formatTerminalAuthWarnings(data.getTerminalAuthWarnings());
+    return String.format(
+        "Attempted: %s | Succeeded: %s | DG3 unlocked: %s | DG4 unlocked: %s | Rights: %s | Warnings: %s",
+        yesNo(data.isTerminalAuthAttempted()),
+        yesNo(data.isTerminalAuthSucceeded()),
+        yesNo(data.isTerminalAuthDg3Unlocked()),
+        yesNo(data.isTerminalAuthDg4Unlocked()),
+        rightsSummary,
+        warningsSummary);
+  }
+
+  private String formatTerminalAuthRights(String role, String rights) {
+    String normalizedRights = normalizeTerminalAuthRights(rights);
+    if (role != null && !role.isBlank()) {
+      if (normalizedRights == null) {
+        return role;
+      }
+      return role + '(' + normalizedRights + ')';
+    }
+    return normalizedRights != null ? normalizedRights : "—";
+  }
+
+  private String normalizeTerminalAuthRights(String rights) {
+    if (rights == null || rights.isBlank()) {
+      return null;
+    }
+    String value = rights;
+    if (value.startsWith("READ_ACCESS_")) {
+      value = value.substring("READ_ACCESS_".length());
+    }
+    if ("NONE".equalsIgnoreCase(value)) {
+      return "none";
+    }
+    value = value.replace("_AND_", " & ");
+    value = value.replace('_', ' ');
+    return value;
+  }
+
+  private String formatTerminalAuthWarnings(List<String> warnings) {
+    if (warnings == null || warnings.isEmpty()) {
+      return "none";
+    }
+    return String.join("; ", warnings);
   }
 
   private Path buildReportPath(String scenarioName) {

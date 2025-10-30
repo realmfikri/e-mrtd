@@ -29,6 +29,7 @@ final class SessionReportParser {
       return null;
     }
     RawDataGroups dg = raw.dg != null ? raw.dg : new RawDataGroups();
+    RawTerminalAuth ta = raw.ta != null ? raw.ta : new RawTerminalAuth();
     List<Integer> present = dg.present != null ? dg.present : Collections.emptyList();
     SessionReportViewData.MrzSummary mrzSummary = toViewMrz(dg.dg1);
     List<Integer> paOk = raw.pa != null ? safeList(raw.pa.okDGs) : Collections.emptyList();
@@ -37,6 +38,7 @@ final class SessionReportParser {
     List<Integer> paLocked = raw.pa != null ? safeList(raw.pa.lockedDGs) : Collections.emptyList();
     String dg2PreviewPath = dg.dg2 != null ? dg.dg2.previewPath : null;
     String issuerPreviewPath = dg.dg2 != null ? dg.dg2.issuerPreviewPath : null;
+    List<String> taWarnings = safeStringList(ta.validationWarnings);
     return new SessionReportViewData(
         raw.session.transport,
         raw.session.smMode,
@@ -60,7 +62,14 @@ final class SessionReportParser {
         dg.dg3Readable,
         dg.dg4Readable,
         dg2PreviewPath,
-        issuerPreviewPath);
+        issuerPreviewPath,
+        ta.attempted,
+        ta.succeeded,
+        ta.dg3Readable,
+        ta.dg4Readable,
+        ta.terminalRole,
+        ta.terminalRights,
+        taWarnings);
   }
 
   static SessionReportViewData fromReport(SessionReport report) {
@@ -73,6 +82,9 @@ final class SessionReportParser {
     SessionReport.Dg2Metadata dg2Metadata = dg.getDg2Metadata();
     String dg2PreviewPath = dg2Metadata != null ? dg2Metadata.previewPath : null;
     String issuerPreviewPath = dg2Metadata != null ? dg2Metadata.issuerPreviewPath : null;
+    SessionReport.TerminalAuth ta = report.terminalAuth != null
+        ? report.terminalAuth
+        : SessionReport.TerminalAuth.fromOutcome(false, false, false, false, null, null, List.of());
     return new SessionReportViewData(
         report.session.transport,
         report.session.smMode,
@@ -96,10 +108,21 @@ final class SessionReportParser {
         dg.isDg3Readable(),
         dg.isDg4Readable(),
         dg2PreviewPath,
-        issuerPreviewPath);
+        issuerPreviewPath,
+        ta.attempted,
+        ta.succeeded,
+        ta.dg3Readable,
+        ta.dg4Readable,
+        ta.terminalRole,
+        ta.terminalRights,
+        ta.validationWarnings);
   }
 
   private static List<Integer> safeList(List<Integer> values) {
+    return values != null ? values : Collections.emptyList();
+  }
+
+  private static List<String> safeStringList(List<String> values) {
     return values != null ? values : Collections.emptyList();
   }
 
@@ -137,6 +160,7 @@ final class SessionReportParser {
     RawPassiveAuth pa;
     RawActiveAuth aa;
     RawDataGroups dg;
+    RawTerminalAuth ta;
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
@@ -176,6 +200,17 @@ final class SessionReportParser {
     boolean dg4Readable;
     RawMrz dg1;
     RawDg2 dg2;
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  private static final class RawTerminalAuth {
+    boolean attempted;
+    boolean succeeded;
+    boolean dg3Readable;
+    boolean dg4Readable;
+    String terminalRole;
+    String terminalRights;
+    List<String> validationWarnings = List.of();
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

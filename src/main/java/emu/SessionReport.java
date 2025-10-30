@@ -20,6 +20,7 @@ public final class SessionReport {
   public final Session session = new Session();
   public PassiveAuth passiveAuth = PassiveAuth.notRun();
   public ActiveAuth activeAuth = ActiveAuth.fromOutcome(null, false);
+  public TerminalAuth terminalAuth = TerminalAuth.notRun();
   public final DataGroups dataGroups = new DataGroups();
 
   public void setPassiveAuthentication(Result result) {
@@ -28,6 +29,14 @@ public final class SessionReport {
 
   public void setActiveAuthentication(SimRunner.ActiveAuthOutcome outcome, boolean requireAa) {
     this.activeAuth = ActiveAuth.fromOutcome(outcome, requireAa);
+  }
+
+  public void setTerminalAuthentication(TerminalAuth terminalAuth) {
+    if (terminalAuth == null) {
+      this.terminalAuth = TerminalAuth.notRun();
+    } else {
+      this.terminalAuth = terminalAuth;
+    }
   }
 
   public void write(Path output) throws IOException {
@@ -44,6 +53,7 @@ public final class SessionReport {
     sb.append("  \"session\": ").append(session.toJson("  ")).append(",\n");
     sb.append("  \"pa\": ").append(passiveAuth.toJson("  ")).append(",\n");
     sb.append("  \"aa\": ").append(activeAuth.toJson("  ")).append(",\n");
+    sb.append("  \"ta\": ").append(terminalAuth.toJson("  ")).append(",\n");
     sb.append("  \"dg\": ").append(dataGroups.toJson("  ")).append('\n');
     sb.append("}\n");
     return sb.toString();
@@ -320,6 +330,67 @@ public final class SessionReport {
     }
   }
 
+  public static final class TerminalAuth {
+    public final boolean attempted;
+    public final boolean succeeded;
+    public final boolean dg3Readable;
+    public final boolean dg4Readable;
+    public final String terminalRole;
+    public final String terminalRights;
+    public final List<String> validationWarnings;
+
+    private TerminalAuth(boolean attempted,
+                         boolean succeeded,
+                         boolean dg3Readable,
+                         boolean dg4Readable,
+                         String terminalRole,
+                         String terminalRights,
+                         List<String> validationWarnings) {
+      this.attempted = attempted;
+      this.succeeded = succeeded;
+      this.dg3Readable = dg3Readable;
+      this.dg4Readable = dg4Readable;
+      this.terminalRole = terminalRole;
+      this.terminalRights = terminalRights;
+      this.validationWarnings = validationWarnings != null ? List.copyOf(validationWarnings) : List.of();
+    }
+
+    public static TerminalAuth fromOutcome(boolean attempted,
+                                           boolean succeeded,
+                                           boolean dg3Readable,
+                                           boolean dg4Readable,
+                                           String terminalRole,
+                                           String terminalRights,
+                                           List<String> validationWarnings) {
+      return new TerminalAuth(
+          attempted,
+          succeeded,
+          dg3Readable,
+          dg4Readable,
+          terminalRole,
+          terminalRights,
+          validationWarnings);
+    }
+
+    static TerminalAuth notRun() {
+      return new TerminalAuth(false, false, false, false, null, null, List.of());
+    }
+
+    String toJson(String indent) {
+      StringBuilder sb = new StringBuilder();
+      sb.append('{');
+      sb.append("\"attempted\":").append(attempted).append(',');
+      sb.append("\"succeeded\":").append(succeeded).append(',');
+      sb.append("\"dg3Readable\":").append(dg3Readable).append(',');
+      sb.append("\"dg4Readable\":").append(dg4Readable).append(',');
+      sb.append("\"terminalRole\":").append(toJsonString(terminalRole)).append(',');
+      sb.append("\"terminalRights\":").append(toJsonString(terminalRights)).append(',');
+      sb.append("\"validationWarnings\":").append(stringList(validationWarnings));
+      sb.append('}');
+      return sb.toString();
+    }
+  }
+
   public static final class Dg2Metadata {
     public final int length;
     public final boolean largeScenario;
@@ -415,6 +486,22 @@ public final class SessionReport {
         sb.append(',');
       }
       sb.append(values.get(i));
+    }
+    sb.append(']');
+    return sb.toString();
+  }
+
+  private static String stringList(List<String> values) {
+    if (values == null || values.isEmpty()) {
+      return "[]";
+    }
+    StringBuilder sb = new StringBuilder();
+    sb.append('[');
+    for (int i = 0; i < values.size(); i++) {
+      if (i > 0) {
+        sb.append(',');
+      }
+      sb.append(toJsonString(values.get(i)));
     }
     sb.append(']');
     return sb.toString();
