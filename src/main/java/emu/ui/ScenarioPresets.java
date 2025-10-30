@@ -81,14 +81,12 @@ final class ScenarioPresets {
         readPreset(
             "Passive Authentication (tamper detection)",
             "Corrupts DG2 during personalisation to show PA failure.",
-            args -> args.seed().requirePa().corruptDg2(),
-            true));
+            args -> args.seed().requirePa().corruptDg2()));
     presets.add(
         readPreset(
             "Passive Authentication (missing trust anchors)",
             "Points PA at an empty trust store to trigger chain validation errors.",
-            args -> args.seed().requirePa().trustStore("target/ui-missing-trust"),
-            true));
+            args -> args.seed().requirePa().trustStore("target/ui-missing-trust")));
     presets.add(
         readPreset(
             "Open reads policy (COM/SOD)",
@@ -203,18 +201,7 @@ final class ScenarioPresets {
 
   private static ScenarioPreset readPreset(
       String name, String description, Consumer<ReadArgsBuilder> argsMutator) {
-    return readPreset(name, description, argsMutator, false);
-  }
-
-  private static ScenarioPreset readPreset(
-      String name,
-      String description,
-      Consumer<ReadArgsBuilder> argsMutator,
-      boolean requiresFreshCard) {
-    return scenario(
-        name,
-        description,
-        List.of(readStep("Run ReadDG1Main", readArgs(argsMutator), requiresFreshCard)));
+    return scenario(name, description, List.of(readStep("Run ReadDG1Main", readArgs(argsMutator))));
   }
 
   private static ScenarioPreset pacePreset(
@@ -226,11 +213,7 @@ final class ScenarioPresets {
   }
 
   private static ScenarioStep readStep(String stepName, List<String> args) {
-    return readStep(stepName, args, false);
-  }
-
-  private static ScenarioStep readStep(String stepName, List<String> args, boolean requiresFreshCard) {
-    return new ScenarioStep(stepName, READ_MAIN, args, true, requiresFreshCard);
+    return new ScenarioStep(stepName, READ_MAIN, args, true);
   }
 
   private static List<String> readArgs(Consumer<ReadArgsBuilder> argsMutator) {
