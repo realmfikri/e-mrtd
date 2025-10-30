@@ -783,8 +783,8 @@ public final class SimRunner {
           "CVCA certificate too large (%d bytes) for standard APDU (max 255 bytes). PUT DATA doesn't support chaining.",
           cvcBytes.length));
     }
-    // P1=0x00 means this is the root CVCA certificate
-    int sw = putData(ch, 0x00, 0x64, cvcBytes, "PUT CVCA certificate");
+    // P1=0x01 stores this as the root CVCA certificate in slot 1
+    int sw = putData(ch, 0x01, 0x64, cvcBytes, "PUT CVCA certificate");
     if (sw != 0x9000) {
       throw new RuntimeException(String.format("Failed to seed CVCA certificate (SW=%04X)", sw));
     }
