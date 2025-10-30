@@ -26,12 +26,12 @@ final class SecurityExplanations {
   }
 
   static {
-    // Happy Path (Issuance + PA)
+    // Passive Authentication (success)
     BY_NAME.put(
-        "Happy Path (Issuance + PA)",
+        "Passive Authentication (success)",
         String.join("\n",
             "What this demonstrates:",
-            "- Personalisation then a read under secure messaging, with Passive Authentication (PA).",
+            "- A seeded read under secure messaging that requires Passive Authentication (PA).",
             "ICAO Doc 9303 alignment:",
             "- PA verifies EF.SOD signature and DG hash values to detect tampering.",
             "- Secure messaging mitigates eavesdropping/replay; BAC used if PACE not negotiated.",
@@ -90,9 +90,9 @@ final class SecurityExplanations {
             "Notes:",
             "- Use the follow-up read’s PA error to brief teams on tamper handling and evidence capture."));
 
-    // BAC Only (no PACE)
+    // BAC secure messaging fallback
     BY_NAME.put(
-        "BAC Only (no PACE)",
+        "BAC secure messaging fallback",
         String.join("\n",
             "What this demonstrates:",
             "- Establishes secure messaging using BAC (MRZ‑derived keys) without attempting PACE.",
@@ -103,61 +103,22 @@ final class SecurityExplanations {
             "Notes:",
             "- PACE offers stronger, modern cryptography and is preferred when available."));
 
-    // PACE (MRZ)
+    // PACE (custom secret)
     BY_NAME.put(
-        "PACE (MRZ)",
+        "PACE (custom secret)",
         String.join("\n",
             "What this demonstrates:",
-            "- PACE using MRZ as the knowledge‑based secret to derive session keys.",
+            "- PACE using the secret configured through the advanced options (MRZ/CAN/PIN/PUK).",
             "ICAO Doc 9303 alignment:",
             "- PACE replaces BAC for access control and key establishment.",
             "Security properties:",
             "- Strong resistance to skimming/eavesdropping; forward‑secure key establishment.",
             "Notes:",
-            "- Exact algorithm/profile (e.g., AES‑128, ECDH groups) depends on chip capabilities."));
+            "- Use advanced options to tailor the secret being supplied to PACE."));
 
-    // PACE (CAN)
+    // PACE profile preference (AES128)
     BY_NAME.put(
-        "PACE (CAN)",
-        String.join("\n",
-            "What this demonstrates:",
-            "- PACE using a Card Access Number (CAN) as the secret.",
-            "ICAO Doc 9303 alignment:",
-            "- PACE supports multiple secrets (MRZ, CAN, PIN, PUK) for access control.",
-            "Security properties:",
-            "- Confidentiality/integrity via secure messaging after PAKE‑based key agreement.",
-            "Notes:",
-            "- CAN workflows are typical for ID cards with visible CAN on the card."));
-
-    // PACE (PIN)
-    BY_NAME.put(
-        "PACE (PIN)",
-        String.join("\n",
-            "What this demonstrates:",
-            "- PACE using a user PIN as the secret for access control.",
-            "ICAO Doc 9303 alignment:",
-            "- PACE with PIN is permitted; protects contactless access with a user‑known secret.",
-            "Security properties:",
-            "- SM keys established from a PAKE; protects APDUs against eavesdropping and tampering.",
-            "Notes:",
-            "- PIN retry/lockout policies are chip‑specific and out of scope here."));
-
-    // PACE (PUK)
-    BY_NAME.put(
-        "PACE (PUK)",
-        String.join("\n",
-            "What this demonstrates:",
-            "- PACE using a PUK (unblock code) as the secret.",
-            "ICAO Doc 9303 alignment:",
-            "- PUK is an allowed secret type for PACE in some deployments.",
-            "Security properties:",
-            "- Establishes SM via PAKE; same transport protections as other PACE profiles.",
-            "Notes:",
-            "- Typically used for recovery/unblock flows; demo does not alter retry counters."));
-
-    // PACE Profile Preference (AES128)
-    BY_NAME.put(
-        "PACE Profile Preference (AES128)",
+        "PACE profile preference (AES128)",
         String.join("\n",
             "What this demonstrates:",
             "- Negotiation preference for a PACE profile using AES‑128.",
@@ -168,12 +129,12 @@ final class SecurityExplanations {
             "Notes:",
             "- Actual profile is negotiated; this sets a preference only."));
 
-    // Chip Authentication Upgrade (CA)
+    // Chip Authentication upgrade
     BY_NAME.put(
-        "Chip Authentication Upgrade (CA)",
+        "Chip Authentication upgrade",
         String.join("\n",
             "What this demonstrates:",
-            "- After reading DG14, upgrades SM via Chip Authentication (CA).",
+            "- After reading DG14, upgrades SM via Chip Authentication (CA) and performs Active Authentication.",
             "ICAO Doc 9303 alignment:",
             "- CA provides chip genuineness and establishes fresh SM keys; preferred to AA where available.",
             "Security properties:",
@@ -181,22 +142,22 @@ final class SecurityExplanations {
             "Notes:",
             "- CA is functionally a stronger successor to Active Authentication."));
 
-    // Passive Auth: PASS
+    // Terminal Authentication without credentials
     BY_NAME.put(
-        "Passive Auth: PASS",
+        "Terminal Authentication without credentials",
         String.join("\n",
             "What this demonstrates:",
-            "- Successful Passive Authentication using the default trust anchors.",
+            "- PACE, PA, and AA succeed but DG3/DG4 remain inaccessible without Terminal Authentication (TA).",
             "ICAO Doc 9303 alignment:",
-            "- Verifies EF.SOD signature chain to CSCA and DG hash consistency.",
+            "- Biometrics are protected by Extended Access Control; TA is required for access.",
             "Security properties:",
-            "- Detects data tampering and fake signers; does not itself provide confidentiality.",
+            "- Access control enforcement on sensitive biometric EFs.",
             "Notes:",
-            "- Ensure the trust store contains the issuing CSCA/DS certificates."));
+            "- Provide TA credentials via advanced options to unlock DG3/DG4."));
 
-    // Passive Auth: Tamper Detection
+    // Passive Authentication (tamper detection)
     BY_NAME.put(
-        "Passive Auth: Tamper Detection",
+        "Passive Authentication (tamper detection)",
         String.join("\n",
             "What this demonstrates:",
             "- A modified LDS (DG2) causes PA to fail due to hash mismatch.",
@@ -207,9 +168,9 @@ final class SecurityExplanations {
             "Notes:",
             "- This does not test CRL/ML checks; only integrity/signature validation."));
 
-    // Passive Auth: Missing Trust Anchors
+    // Passive Authentication (missing trust anchors)
     BY_NAME.put(
-        "Passive Auth: Missing Trust Anchors",
+        "Passive Authentication (missing trust anchors)",
         String.join("\n",
             "What this demonstrates:",
             "- PA fails when the DS/CSCA trust chain cannot be validated.",
@@ -219,19 +180,6 @@ final class SecurityExplanations {
             "- Prevents acceptance of data signed by unknown or untrusted issuers.",
             "Notes:",
             "- Populate a trust store with appropriate CSCA/DS certificates to succeed."));
-
-    // Terminal Auth: Locked Biometrics
-    BY_NAME.put(
-        "Terminal Auth: Locked Biometrics",
-        String.join("\n",
-            "What this demonstrates:",
-            "- Attempting to read DG3/DG4 without Terminal Authentication (TA) is blocked.",
-            "ICAO Doc 9303 alignment:",
-            "- Biometrics are protected by Extended Access Control; TA is required for access.",
-            "Security properties:",
-            "- Access control enforcement on sensitive biometric EFs.",
-            "Notes:",
-            "- TA requires a valid CVC chain and a terminal private key."));
 
     // Terminal Auth: DG3 Rights
     BY_NAME.put(
@@ -285,9 +233,9 @@ final class SecurityExplanations {
             "Notes:",
             "- Adjust date/time to fall within the CVC validity window to succeed."));
 
-    // Open Reads Policy (COM/SOD)
+    // Open reads policy (COM/SOD)
     BY_NAME.put(
-        "Open Reads Policy (COM/SOD)",
+        "Open reads policy (COM/SOD)",
         String.join("\n",
             "What this demonstrates:",
             "- Reading EF.COM/EF.SOD under either open or secure policies.",
@@ -311,9 +259,9 @@ final class SecurityExplanations {
             "Notes:",
             "- Truncation here refers to UI/log metadata, not cryptographic truncation."));
 
-    // JSON Report Export
+    // JSON report export
     BY_NAME.put(
-        "JSON Report Export",
+        "JSON report export",
         String.join("\n",
             "What this demonstrates:",
             "- Exporting a JSON report of the session for evidence/debugging.",
