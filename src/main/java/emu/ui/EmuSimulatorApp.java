@@ -311,7 +311,10 @@ public final class EmuSimulatorApp extends Application {
     facePreviewBox.managedProperty().bind(facePreviewBox.visibleProperty());
 
     VBox container = new VBox(12, grid, facePreviewBox);
-    Tab tab = new Tab("Issuer Output", container);
+    ScrollPane scrollPane = new ScrollPane(container);
+    scrollPane.setFitToWidth(true);
+
+    Tab tab = new Tab("Issuer Output", scrollPane);
     tab.setClosable(false);
     tab.setDisable(true);
     return tab;
@@ -383,7 +386,11 @@ public final class EmuSimulatorApp extends Application {
         paHeader,
         paGrid);
 
-    Tab tab = new Tab("Card vs Terminal", container);
+    ScrollPane scrollPane = new ScrollPane(container);
+    scrollPane.setFitToWidth(true);
+    scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+
+    Tab tab = new Tab("Card vs Terminal", scrollPane);
     tab.setClosable(false);
     tab.setDisable(true);
     return tab;
@@ -451,7 +458,10 @@ public final class EmuSimulatorApp extends Application {
   private Tab buildSecurityTab() {
     securityContent.setWrapText(true);
     securityContent.setPadding(new Insets(16));
-    Tab tab = new Tab("Security Explained", securityContent);
+    ScrollPane scrollPane = new ScrollPane(securityContent);
+    scrollPane.setFitToWidth(true);
+
+    Tab tab = new Tab("Security Explained", scrollPane);
     tab.setClosable(false);
     return tab;
   }
