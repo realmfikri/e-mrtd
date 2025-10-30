@@ -743,9 +743,10 @@ public final class SimRunner {
   private static void seedCvcaCertificate(CardChannel ch) throws Exception {
     // Generate a minimal CVCA certificate for chip authentication/terminal authentication
     // This allows the applet to pass the hasEACCertificate() check
-    // Note: Applet only supports RSA 1024-bit keys (see CVCertificate.java:119)
+    // Note: Using 512-bit RSA to keep certificate size under 255-byte APDU limit
+    // (PUT DATA doesn't support command chaining, unlike PSO)
     KeyPairGenerator rsaGenerator = KeyPairGenerator.getInstance("RSA");
-    rsaGenerator.initialize(1024);
+    rsaGenerator.initialize(512);
     KeyPair cvcaKeyPair = rsaGenerator.generateKeyPair();
     RSAPublicKey rsaPublicKey = (RSAPublicKey) cvcaKeyPair.getPublic();
 
@@ -776,6 +777,12 @@ public final class SimRunner {
     certificate.setSignature(signature.sign());
 
     byte[] cvcBytes = certificate.getDEREncoded();
+    System.out.printf("Generated CVCA certificate: %d bytes (APDU limit: 255)%n", cvcBytes.length);
+    if (cvcBytes.length > 255) {
+      throw new RuntimeException(String.format(
+          "CVCA certificate too large (%d bytes) for standard APDU (max 255 bytes). PUT DATA doesn't support chaining.",
+          cvcBytes.length));
+    }
     // P1=0x00 means this is the root CVCA certificate
     int sw = putData(ch, 0x00, 0x64, cvcBytes, "PUT CVCA certificate");
     if (sw != 0x9000) {
