@@ -591,7 +591,8 @@ public final class SimRunner {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
 
-    if (artifacts.getChipAuthKeyPair() != null) {
+    byte[] dg14Bytes = artifacts.getDg14Bytes();
+    if (dg14Bytes != null && dg14Bytes.length > 0 && artifacts.getChipAuthKeyPair() != null) {
       seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
     }
 
@@ -646,7 +647,8 @@ public final class SimRunner {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
 
-    if (artifacts.getChipAuthKeyPair() != null) {
+    byte[] dg14Bytes = artifacts.getDg14Bytes();
+    if (dg14Bytes != null && dg14Bytes.length > 0 && artifacts.getChipAuthKeyPair() != null) {
       seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
     }
 
@@ -727,11 +729,17 @@ public final class SimRunner {
       System.out.println("Skipping CA key seed: public key is not EC.");
       return;
     }
-    ECPublicKey ecPublicKey = (ECPublicKey) publicKey;
-    byte[] ecPrivateKeyTlv = buildEcPrivateKeyTlv(ecPublicKey, privateKey);
-    int sw = putData(ch, 0x00, 0x63, ecPrivateKeyTlv, "PUT CA EC private key TLV");
-    if (sw != 0x9000) {
-      throw new RuntimeException(String.format("Failed to seed CA EC private key (SW=%04X)", sw));
+    try {
+      ECPublicKey ecPublicKey = (ECPublicKey) publicKey;
+      byte[] ecPrivateKeyTlv = buildEcPrivateKeyTlv(ecPublicKey, privateKey);
+      System.out.printf("Seeding CA EC private key (%d bytes)%n", ecPrivateKeyTlv.length);
+      int sw = putData(ch, 0x00, 0x63, ecPrivateKeyTlv, "PUT CA EC private key TLV");
+      if (sw != 0x9000) {
+        System.err.printf("Warning: Failed to seed CA EC private key (SW=%04X). CA may not work.%n", sw);
+      }
+    } catch (Exception e) {
+      System.err.println("Warning: Exception while seeding CA key: " + e.getMessage());
+      e.printStackTrace();
     }
   }
 
