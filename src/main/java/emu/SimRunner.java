@@ -93,6 +93,7 @@ import java.util.stream.Stream;
 
 import emu.PersonalizationSupport.SODArtifacts;
 import emu.SimLogCategory;
+import sos.passportapplet.PassportApplet;
 
 public final class SimRunner {
   private static final byte[] MRTD_AID = new byte[]{(byte)0xA0,0x00,0x00,0x02,0x47,0x10,0x01};
@@ -112,6 +113,7 @@ public final class SimRunner {
   private static final String DEFAULT_DOE = "250101";
 
   private static final int PUT_DATA_P2_CURRENT_DATE = 0x67;
+  private static final int PUT_DATA_P2_CVCA_CERTIFICATE = 0x64;
 
   private static final int AA_CHALLENGE_LENGTH = 8;
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
@@ -132,6 +134,7 @@ public final class SimRunner {
     boolean requirePA = config.requirePa;
     boolean requireAA = config.requireAa;
     List<Path> taCvcPaths = new ArrayList<>(config.taCvcPaths);
+    List<CvcBundle> taCertificates = loadCvcCertificates(taCvcPaths);
     Path taKeyPath = config.taKeyPath;
     Path jsonOutPath = config.reportOutput;
     Path eventsOutPath = config.eventsOutput;
@@ -247,6 +250,8 @@ public final class SimRunner {
       }
     }
 
+    installCvcaCertificatesIfNecessary(ch, taCertificates);
+
     boolean shouldProgramLifecycle = createdSimulator || (seed && !reuseIssuerCard);
     if (shouldProgramLifecycle) {
       byte[] currentDateTlv = encodeCurrentDate(terminalAuthDate);
@@ -342,7 +347,6 @@ public final class SimRunner {
       throw new RuntimeException("Active Authentication failed but was required");
     }
 
-    List<CvcBundle> taCertificates = loadCvcCertificates(taCvcPaths);
     reportTerminalAuthentication(dg14, taCertificates);
     TerminalAuthOutcome terminalAuthOutcome = performTerminalAuthentication(
         svc,
@@ -1466,16 +1470,128 @@ public final class SimRunner {
   private static List<CvcBundle> loadCvcCertificates(List<Path> paths) {
     List<CvcBundle> bundles = new ArrayList<>();
     for (Path path : paths) {
+      byte[] encoded = null;
+      CVCertificate certificate = null;
+      CardVerifiableCertificate cardCertificate = null;
+      AuthorizationRoleEnum role = null;
+      AccessRightEnum rights = null;
+      Exception error = null;
       try {
-        byte[] encoded = Files.readAllBytes(path);
-        CVCertificate certificate = CertificateParser.parseCertificate(encoded);
-        CardVerifiableCertificate cardCertificate = new WrappedCardVerifiableCertificate(certificate);
-        bundles.add(new CvcBundle(path, certificate, cardCertificate, null));
+        encoded = Files.readAllBytes(path);
+        certificate = CertificateParser.parseCertificate(encoded);
+        AuthorizationField authorizationField = extractAuthorizationField(certificate);
+        if (authorizationField != null) {
+          role = authorizationField.getRole();
+          rights = authorizationField.getAccessRight();
+        }
+        cardCertificate = new WrappedCardVerifiableCertificate(certificate);
       } catch (IOException | ParseException | ConstructionException e) {
-        bundles.add(new CvcBundle(path, null, null, e));
+        error = e;
       }
+      bundles.add(new CvcBundle(path, encoded, certificate, cardCertificate, role, rights, error));
     }
     return bundles;
+  }
+
+  private static AuthorizationField extractAuthorizationField(CVCertificate certificate) {
+    if (certificate == null) {
+      return null;
+    }
+    try {
+      CVCertificateBody body = certificate.getCertificateBody();
+      if (body == null) {
+        return null;
+      }
+      CVCAuthorizationTemplate template;
+      try {
+        template = body.getAuthorizationTemplate();
+      } catch (NoSuchFieldException e) {
+        return null;
+      }
+      if (template == null) {
+        return null;
+      }
+      try {
+        return template.getAuthorizationField();
+      } catch (NoSuchFieldException e) {
+        return null;
+      }
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private static AuthorizationRoleEnum resolveBundleRole(CvcBundle bundle) {
+    if (bundle == null) {
+      return null;
+    }
+    if (bundle.role != null) {
+      return bundle.role;
+    }
+    AuthorizationField authorizationField = extractAuthorizationField(bundle.certificate);
+    return authorizationField != null ? authorizationField.getRole() : null;
+  }
+
+  private static void installCvcaCertificatesIfNecessary(CardChannel ch, List<CvcBundle> bundles)
+      throws Exception {
+    if (bundles == null || bundles.isEmpty()) {
+      return;
+    }
+    boolean hasCvca = false;
+    for (CvcBundle bundle : bundles) {
+      if (bundle == null) {
+        continue;
+      }
+      if (resolveBundleRole(bundle) == AuthorizationRoleEnum.CVCA) {
+        hasCvca = true;
+        break;
+      }
+    }
+    if (!hasCvca) {
+      return;
+    }
+    if (PassportApplet.hasEACCertificate()) {
+      securityPrintln("Skipping CVCA installation: applet already has an EAC certificate.");
+      return;
+    }
+    if (PassportApplet.isLocked()) {
+      securityPrintln("Skipping CVCA installation: applet lifecycle is LOCKED.");
+      return;
+    }
+
+    int slot = 1;
+    for (CvcBundle bundle : bundles) {
+      if (bundle == null) {
+        continue;
+      }
+      AuthorizationRoleEnum role = resolveBundleRole(bundle);
+      if (role != AuthorizationRoleEnum.CVCA) {
+        continue;
+      }
+      if (bundle.error != null) {
+        securityPrintln(String.format(
+            "Skipping CVCA install for %s: %s",
+            describePath(bundle),
+            bundle.error.getMessage() != null ? bundle.error.getMessage() : "unknown error"));
+        continue;
+      }
+      if (bundle.encoded == null) {
+        securityPrintln(String.format(
+            "Skipping CVCA install for %s: no encoded certificate available.",
+            describePath(bundle)));
+        continue;
+      }
+      int sw = putData(ch, slot, PUT_DATA_P2_CVCA_CERTIFICATE, bundle.encoded,
+          String.format("PUT DATA CVCA certificate slot=%d (%s)", slot, describePath(bundle)));
+      if (sw != 0x9000) {
+        throw new RuntimeException(String.format(
+            "Failed to install CVCA certificate from %s (slot=%d, SW=%04X).",
+            describePath(bundle),
+            slot,
+            sw));
+      }
+      slot = slot == 1 ? 2 : 1;
+    }
   }
 
   private static TerminalAuthOutcome performTerminalAuthentication(
@@ -1731,6 +1847,12 @@ public final class SimRunner {
       }
       AuthorizationRoleEnum role = authorizationField != null ? authorizationField.getRole() : null;
       AccessRightEnum rights = authorizationField != null ? authorizationField.getAccessRight() : null;
+      if (role == null) {
+        role = bundle.role;
+      }
+      if (rights == null) {
+        rights = bundle.rights;
+      }
 
       securityPrintln(String.format("  %s → holder=%s issuer=%s role=%s rights=%s valid=%s..%s",
           bundle.path,
@@ -1962,18 +2084,27 @@ public final class SimRunner {
 
   private static final class CvcBundle {
     final Path path;
+    final byte[] encoded;
     final CVCertificate certificate;
     final CardVerifiableCertificate cardCertificate;
+    final AuthorizationRoleEnum role;
+    final AccessRightEnum rights;
     final Exception error;
 
     private CvcBundle(
         Path path,
+        byte[] encoded,
         CVCertificate certificate,
         CardVerifiableCertificate cardCertificate,
+        AuthorizationRoleEnum role,
+        AccessRightEnum rights,
         Exception error) {
       this.path = path;
+      this.encoded = encoded;
       this.certificate = certificate;
       this.cardCertificate = cardCertificate;
+      this.role = role;
+      this.rights = rights;
       this.error = error;
     }
   }
