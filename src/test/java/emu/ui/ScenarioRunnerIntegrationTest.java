@@ -259,6 +259,51 @@ class ScenarioRunnerIntegrationTest {
     assertNull(resolved, "Steps marked as fresh should not reuse issuer personalization");
   }
 
+  @Test
+  void passiveAuthPresetsRequestFreshCardsWhenIssuerCached() throws Exception {
+    ScenarioRunner runner = new ScenarioRunner();
+    AdvancedOptionsSnapshot options = emptyAdvancedOptions();
+
+    Path issuerOutput = Files.createTempDirectory("scenario-runner-passive-issuer");
+    ScenarioStep issuerStep = new ScenarioStep(
+        "Issue document",
+        "emu.IssuerMain",
+        List.of("--output=" + issuerOutput, "--lifecycle=PERSONALIZED", "--lifecycle=LOCKED"),
+        false);
+
+    RecordingListener issuerListener = new RecordingListener();
+    Method runIssuer = ScenarioRunner.class.getDeclaredMethod(
+        "runIssuerStep", ScenarioStep.class, AdvancedOptionsSnapshot.class, ScenarioExecutionListener.class);
+    runIssuer.setAccessible(true);
+    IssuerSimulator.Result issuerResult =
+        (IssuerSimulator.Result) runIssuer.invoke(runner, issuerStep, options, issuerListener);
+
+    List<String> presetNames = List.of(
+        "Passive Authentication (tamper detection)",
+        "Passive Authentication (missing trust anchors)");
+
+    for (String presetName : presetNames) {
+      ScenarioPreset preset = ScenarioPresets.all().stream()
+          .filter(p -> p.getName().equals(presetName))
+          .findFirst()
+          .orElseThrow(() -> new IllegalStateException("Missing preset " + presetName));
+
+      RecordingListener listener = new RecordingListener();
+      Path reportPath = Files.createTempFile("scenario-runner-passive", ".json");
+      Task<ScenarioResult> task = runner.createTask(preset, options, reportPath, listener, issuerResult);
+
+      Method call = task.getClass().getDeclaredMethod("call");
+      call.setAccessible(true);
+      ScenarioResult result = (ScenarioResult) call.invoke(task);
+
+      assertFalse(result.isSuccess(), presetName + " should fail when Passive Authentication errors are expected");
+      assertEquals("Run ReadDG1Main", result.getFailedStep(), "Read step should be marked as failed");
+      assertTrue(
+          listener.logs.stream().anyMatch(log -> log.contains("cached issuer result will not be reused")),
+          "Scenario should skip cached issuer personalization for " + presetName);
+    }
+  }
+
   private static AdvancedOptionsSnapshot emptyAdvancedOptions() {
     return new AdvancedOptionsSnapshot(
         null,
