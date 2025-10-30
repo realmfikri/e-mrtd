@@ -70,8 +70,8 @@ final class ScenarioPresets {
     presets.add(
         pacePreset(
             "Chip Authentication upgrade",
-            "Attempts PACE then requires Active Authentication to highlight the CA secure messaging upgrade.",
-            args -> args.requireAa()));
+            "Attempts PACE then requires Chip Authentication to demonstrate the CA secure messaging upgrade.",
+            args -> args.requireCa().requireAa()));
     presets.add(
         pacePreset(
             "Terminal Authentication without credentials",
@@ -111,7 +111,7 @@ final class ScenarioPresets {
             generateAndRead(
                 "target/ta-demo/dg3",
                 List.of("--rights=DG3"),
-                readArgs(args -> args.seed().attemptPace().taCvc("target/ta-demo/dg3/terminal.cvc").taKey("target/ta-demo/dg3/terminal.key")))));
+                readArgs(args -> args.seed().attemptPace().requireCa().taCvc("target/ta-demo/dg3/terminal.cvc").taKey("target/ta-demo/dg3/terminal.key")))));
     presets.add(
         scenario(
             "Terminal Auth: DG4 Rights",
@@ -119,7 +119,7 @@ final class ScenarioPresets {
             generateAndRead(
                 "target/ta-demo/dg4",
                 List.of("--rights=DG4"),
-                readArgs(args -> args.seed().attemptPace().taCvc("target/ta-demo/dg4/terminal.cvc").taKey("target/ta-demo/dg4/terminal.key")))));
+                readArgs(args -> args.seed().attemptPace().requireCa().taCvc("target/ta-demo/dg4/terminal.cvc").taKey("target/ta-demo/dg4/terminal.key")))));
     presets.add(
         scenario(
             "Terminal Auth: DG3+DG4 Rights",
@@ -127,7 +127,7 @@ final class ScenarioPresets {
             generateAndRead(
                 "target/ta-demo/dg34",
                 List.of("--rights=DG3_DG4"),
-                readArgs(args -> args.seed().attemptPace().taCvc("target/ta-demo/dg34/terminal.cvc").taKey("target/ta-demo/dg34/terminal.key")))));
+                readArgs(args -> args.seed().attemptPace().requireCa().taCvc("target/ta-demo/dg34/terminal.cvc").taKey("target/ta-demo/dg34/terminal.key")))));
     presets.add(
         scenario(
             "Terminal Auth: Date Validity",
@@ -138,6 +138,7 @@ final class ScenarioPresets {
                 readArgs(args -> args
                     .seed()
                     .attemptPace()
+                    .requireCa()
                     .taCvc("target/ta-demo/date/terminal.cvc")
                     .taKey("target/ta-demo/date/terminal.key")
                     .taDate("2035-01-01")))));
@@ -160,6 +161,7 @@ final class ScenarioPresets {
     readArgs.add("--seed");
     readArgs.add("--attempt-pace");
     readArgs.add("--require-pa");
+    readArgs.add("--require-ca");
     readArgs.add("--require-aa");
     readArgs.add("--ta-cvc=" + cvcaPath);
     readArgs.add("--ta-cvc=" + terminalPath);
@@ -259,6 +261,11 @@ final class ScenarioPresets {
 
     ReadArgsBuilder requireAa() {
       args.add("--require-aa");
+      return this;
+    }
+
+    ReadArgsBuilder requireCa() {
+      args.add("--require-ca");
       return this;
     }
 
