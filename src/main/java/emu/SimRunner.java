@@ -22,7 +22,6 @@ import org.ejbca.cvc.CVCertificateBody;
 import org.ejbca.cvc.CVCPublicKey;
 import org.ejbca.cvc.CertificateParser;
 import org.ejbca.cvc.HolderReferenceField;
-import org.ejbca.cvc.KeyFactory;
 import org.ejbca.cvc.exception.ConstructionException;
 import org.ejbca.cvc.exception.ParseException;
 import org.jmrtd.BACKey;
@@ -760,7 +759,7 @@ public final class SimRunner {
     Date notBefore = new Date();
     Date notAfter = new Date(System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000);
 
-    CVCPublicKey cvcPublicKey = KeyFactory.createInstance(rsaPublicKey, "SHA1withRSA", AuthorizationRoleEnum.CVCA);
+    CVCPublicKey cvcPublicKey = org.ejbca.cvc.KeyFactory.createInstance(rsaPublicKey, "SHA1withRSA", AuthorizationRoleEnum.CVCA);
     CVCertificateBody body = new CVCertificateBody(
         caReference,
         cvcPublicKey,
