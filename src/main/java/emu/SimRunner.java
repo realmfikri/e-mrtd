@@ -743,8 +743,9 @@ public final class SimRunner {
   private static void seedCvcaCertificate(CardChannel ch) throws Exception {
     // Generate a minimal CVCA certificate for chip authentication/terminal authentication
     // This allows the applet to pass the hasEACCertificate() check
+    // Note: Applet only supports RSA 1024-bit keys (see CVCertificate.java:119)
     KeyPairGenerator rsaGenerator = KeyPairGenerator.getInstance("RSA");
-    rsaGenerator.initialize(2048);
+    rsaGenerator.initialize(1024);
     KeyPair cvcaKeyPair = rsaGenerator.generateKeyPair();
     RSAPublicKey rsaPublicKey = (RSAPublicKey) cvcaKeyPair.getPublic();
 
