@@ -33,7 +33,6 @@ public final class ReadDG1Main {
     boolean attemptPace = false;
     boolean requirePa = false;
     boolean requireAa = false;
-    boolean requireCa = false;
     String pacePreference = null;
     String taDateOverride = null;
     String trustStorePassword = null;
@@ -83,8 +82,6 @@ public final class ReadDG1Main {
         requirePa = true;
       } else if ("--require-aa".equals(arg) || "--aa".equals(arg)) {
         requireAa = true;
-      } else if ("--require-ca".equals(arg) || "--ca".equals(arg)) {
-        requireCa = true;
       } else if ("--corrupt-dg2".equals(arg)) {
         corruptDg2 = true;
       } else if ("--large-dg2".equals(arg)) {
@@ -163,8 +160,7 @@ public final class ReadDG1Main {
         .largeDg2(largeDg2)
         .attemptPace(attemptPace)
         .requirePa(requirePa)
-        .requireAa(requireAa)
-        .requireCa(requireCa);
+        .requireAa(requireAa);
     if (pacePreference != null) {
       builder.pacePreference(pacePreference);
     }

@@ -65,13 +65,9 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.Signature;
-import java.security.interfaces.ECPrivateKey;
 import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.ECParameterSpec;
-import java.security.spec.ECPoint;
-import java.security.spec.EllipticCurve;
 import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
@@ -135,7 +131,6 @@ public final class SimRunner {
     String trustStorePassword = config.trustStorePassword;
     boolean requirePA = config.requirePa;
     boolean requireAA = config.requireAa;
-    boolean requireCA = config.requireCa;
     List<Path> taCvcPaths = new ArrayList<>(config.taCvcPaths);
     Path taKeyPath = config.taKeyPath;
     Path jsonOutPath = config.reportOutput;
@@ -336,9 +331,6 @@ public final class SimRunner {
     ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(svc, dg14);
     report.session.caEstablished = chipAuthOutcome.established;
     System.out.printf("caEstablished=%s%n", chipAuthOutcome.established);
-    if (requireCA && !chipAuthOutcome.established) {
-      throw new RuntimeException("Chip Authentication failed but was required");
-    }
 
     DG15File dg15 = readDG15(svc);
     if (dg15 != null) {
@@ -591,10 +583,6 @@ public final class SimRunner {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
 
-    if (artifacts.getChipAuthKeyPair() != null) {
-      seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
-    }
-
     writeDefaultTrustAnchors(artifacts);
     return artifacts;
   }
@@ -645,11 +633,6 @@ public final class SimRunner {
     if (artifacts.getAaKeyPair() != null && artifacts.getAaKeyPair().getPrivate() != null) {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
-
-    if (artifacts.getChipAuthKeyPair() != null) {
-      seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
-    }
-
     writeDefaultTrustAnchors(artifacts);
   }
 
@@ -716,25 +699,6 @@ public final class SimRunner {
     }
   }
 
-  private static void seedChipAuthenticationKey(CardChannel ch, KeyPair chipAuthKeyPair) throws Exception {
-    if (chipAuthKeyPair == null) {
-      System.out.println("Skipping CA key seed: key pair is null.");
-      return;
-    }
-    PublicKey publicKey = chipAuthKeyPair.getPublic();
-    PrivateKey privateKey = chipAuthKeyPair.getPrivate();
-    if (!(publicKey instanceof ECPublicKey)) {
-      System.out.println("Skipping CA key seed: public key is not EC.");
-      return;
-    }
-    ECPublicKey ecPublicKey = (ECPublicKey) publicKey;
-    byte[] ecPrivateKeyTlv = buildEcPrivateKeyTlv(ecPublicKey, privateKey);
-    int sw = putData(ch, 0x00, 0x63, ecPrivateKeyTlv, "PUT CA EC private key TLV");
-    if (sw != 0x9000) {
-      throw new RuntimeException(String.format("Failed to seed CA EC private key (SW=%04X)", sw));
-    }
-  }
-
   private static byte[] buildRsaPrivateKeyTlv(int containerTag, byte[] keyBytes) {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     writeTag(out, containerTag);
@@ -744,81 +708,6 @@ public final class SimRunner {
     writeTag(out, 0x04);
     writeLength(out, keyBytes.length);
     out.write(keyBytes, 0, keyBytes.length);
-    return out.toByteArray();
-  }
-
-  private static byte[] buildEcPrivateKeyTlv(ECPublicKey ecPublicKey, PrivateKey privateKey) throws Exception {
-    if (!(privateKey instanceof ECPrivateKey)) {
-      throw new IllegalArgumentException("Private key must be ECPrivateKey");
-    }
-    ECPrivateKey ecPrivateKey = (ECPrivateKey) privateKey;
-    ECParameterSpec params = ecPublicKey.getParams();
-    EllipticCurve curve = params.getCurve();
-    ECPoint generator = params.getGenerator();
-
-    ByteArrayOutputStream out = new ByteArrayOutputStream();
-
-    // 0x81: Prime field P (using standard curve primes based on field size)
-    int fieldSize = curve.getField().getFieldSize();
-    byte[] prime;
-    if (fieldSize == 256) {
-      // P-256 (secp256r1) prime
-      prime = stripLeadingZero(new BigInteger("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16).toByteArray());
-    } else if (fieldSize == 384) {
-      // P-384 (secp384r1) prime
-      prime = stripLeadingZero(new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFF0000000000000000FFFFFFFF", 16).toByteArray());
-    } else if (fieldSize == 521) {
-      // P-521 (secp521r1) prime
-      prime = stripLeadingZero(new BigInteger("01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", 16).toByteArray());
-    } else {
-      throw new IllegalArgumentException("Unsupported EC curve field size: " + fieldSize);
-    }
-    writeTag(out, 0x81);
-    writeLength(out, prime.length);
-    out.write(prime, 0, prime.length);
-
-    // 0x82: Coefficient A
-    byte[] a = stripLeadingZero(curve.getA().toByteArray());
-    writeTag(out, 0x82);
-    writeLength(out, a.length);
-    out.write(a, 0, a.length);
-
-    // 0x83: Coefficient B
-    byte[] b = stripLeadingZero(curve.getB().toByteArray());
-    writeTag(out, 0x83);
-    writeLength(out, b.length);
-    out.write(b, 0, b.length);
-
-    // 0x84: Generator G (uncompressed point format: 0x04 || X || Y)
-    byte[] gx = stripLeadingZero(generator.getAffineX().toByteArray());
-    byte[] gy = stripLeadingZero(generator.getAffineY().toByteArray());
-    int coordSize = (curve.getField().getFieldSize() + 7) / 8;
-    byte[] g = new byte[1 + coordSize * 2];
-    g[0] = 0x04; // Uncompressed point
-    System.arraycopy(gx, 0, g, 1 + coordSize - gx.length, gx.length);
-    System.arraycopy(gy, 0, g, 1 + coordSize + coordSize - gy.length, gy.length);
-    writeTag(out, 0x84);
-    writeLength(out, g.length);
-    out.write(g, 0, g.length);
-
-    // 0x85: Order R
-    byte[] r = stripLeadingZero(params.getOrder().toByteArray());
-    writeTag(out, 0x85);
-    writeLength(out, r.length);
-    out.write(r, 0, r.length);
-
-    // 0x86: Private key S
-    byte[] s = stripLeadingZero(ecPrivateKey.getS().toByteArray());
-    writeTag(out, 0x86);
-    writeLength(out, s.length);
-    out.write(s, 0, s.length);
-
-    // 0x87: Cofactor (h = 1 for most curves)
-    writeTag(out, 0x87);
-    writeLength(out, 2);
-    out.write(0x00);
-    out.write(params.getCofactor());
-
     return out.toByteArray();
   }
 
