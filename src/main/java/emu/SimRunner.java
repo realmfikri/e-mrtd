@@ -1291,49 +1291,17 @@ public final class SimRunner {
     outcome.publicKeyInfo = publicKeyInfo;
     try {
       String caOid = outcome.selectedInfo.getObjectIdentifier();
-      String agreementAlg;
-      String cipherAlg;
+      String publicKeyOid = publicKeyInfo.getObjectIdentifier();
 
-      try {
-        agreementAlg = ChipAuthenticationInfo.toKeyAgreementAlgorithm(caOid);
-        cipherAlg = ChipAuthenticationInfo.toCipherAlgorithm(caOid);
-      } catch (NumberFormatException e) {
-        // Fallback: JMRTD library has a bug parsing some CA OIDs
-        // If the OID contains "ECDH", use ECDH as the agreement algorithm
-        System.out.println("Warning: Unable to parse CA OID, using fallback: " + e.getMessage());
-        if (caOid != null && caOid.contains("2.2.3")) {
-          // id-CA-ECDH family: 0.4.0.127.0.7.2.2.3.x.y
-          agreementAlg = "ECDH";
-        } else if (caOid != null && caOid.contains("2.2.1")) {
-          // id-CA-DH family: 0.4.0.127.0.7.2.2.1.x.y
-          agreementAlg = "DH";
-        } else {
-          throw new RuntimeException("Unable to determine key agreement algorithm from OID: " + caOid, e);
-        }
-
-        // Determine cipher from OID
-        if (caOid.endsWith(".1")) {
-          cipherAlg = "DESede";
-        } else if (caOid.endsWith(".2.1")) {
-          cipherAlg = "AES-128";
-        } else if (caOid.endsWith(".2.2")) {
-          cipherAlg = "AES-192";
-        } else if (caOid.endsWith(".2.3")) {
-          cipherAlg = "AES-256";
-        } else {
-          cipherAlg = "DESede";  // Default fallback
-        }
-        System.out.println("Using: agreementAlg=" + agreementAlg + ", cipherAlg=" + cipherAlg);
-      }
-
-      EACCAResult result = svc.doEACCA(keyId, agreementAlg, cipherAlg, publicKeyInfo.getSubjectPublicKey());
+      // Pass the OIDs directly to doEACCA - the library expects OID strings, not algorithm names
+      EACCAResult result = svc.doEACCA(keyId, caOid, publicKeyOid, publicKeyInfo.getSubjectPublicKey());
       outcome.result = result;
       outcome.established = result != null && result.getWrapper() != null;
       if (outcome.established) {
         securityPrintln(String.format(
-            "Chip Authentication established (agreement=%s cipher=%s keyId=%s).",
-            agreementAlg,
-            cipherAlg,
+            "Chip Authentication established (protocol=%s keyId=%s).",
+            outcome.selectedInfo.getProtocolOIDString() != null ?
+                outcome.selectedInfo.getProtocolOIDString() : caOid,
             keyId != null ? keyId.toString(16) : "n/a"));
         logSecureMessagingTransition(
             "Chip Authentication",
