@@ -19,8 +19,10 @@ import org.ejbca.cvc.CAReferenceField;
 import org.ejbca.cvc.CVCAuthorizationTemplate;
 import org.ejbca.cvc.CVCertificate;
 import org.ejbca.cvc.CVCertificateBody;
+import org.ejbca.cvc.CVCPublicKey;
 import org.ejbca.cvc.CertificateParser;
 import org.ejbca.cvc.HolderReferenceField;
+import org.ejbca.cvc.KeyFactory;
 import org.ejbca.cvc.exception.ConstructionException;
 import org.ejbca.cvc.exception.ParseException;
 import org.jmrtd.BACKey;
@@ -60,15 +62,21 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.Signature;
+import java.security.interfaces.ECPrivateKey;
 import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.security.KeyPair;
 import java.security.spec.AlgorithmParameterSpec;
+import java.security.spec.ECParameterSpec;
+import java.security.spec.ECPoint;
+import java.security.spec.EllipticCurve;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Instant;
@@ -583,6 +591,12 @@ public final class SimRunner {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
 
+    if (artifacts.getChipAuthKeyPair() != null) {
+      seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
+    }
+
+    seedCvcaCertificate(ch);
+
     writeDefaultTrustAnchors(artifacts);
     return artifacts;
   }
@@ -633,6 +647,13 @@ public final class SimRunner {
     if (artifacts.getAaKeyPair() != null && artifacts.getAaKeyPair().getPrivate() != null) {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
+
+    if (artifacts.getChipAuthKeyPair() != null) {
+      seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
+    }
+
+    seedCvcaCertificate(ch);
+
     writeDefaultTrustAnchors(artifacts);
   }
 
@@ -699,6 +720,69 @@ public final class SimRunner {
     }
   }
 
+  private static void seedChipAuthenticationKey(CardChannel ch, KeyPair chipAuthKeyPair) throws Exception {
+    if (chipAuthKeyPair == null) {
+      System.out.println("Skipping CA key seed: key pair is null.");
+      return;
+    }
+    PublicKey publicKey = chipAuthKeyPair.getPublic();
+    PrivateKey privateKey = chipAuthKeyPair.getPrivate();
+    if (!(publicKey instanceof ECPublicKey)) {
+      System.out.println("Skipping CA key seed: public key is not EC.");
+      return;
+    }
+    ECPublicKey ecPublicKey = (ECPublicKey) publicKey;
+    byte[] ecPrivateKeyTlv = buildEcPrivateKeyTlv(ecPublicKey, privateKey);
+    int sw = putData(ch, 0x00, 0x63, ecPrivateKeyTlv, "PUT CA EC private key TLV");
+    if (sw != 0x9000) {
+      throw new RuntimeException(String.format("Failed to seed CA EC private key (SW=%04X)", sw));
+    }
+    System.out.println("Successfully seeded Chip Authentication EC private key");
+  }
+
+  private static void seedCvcaCertificate(CardChannel ch) throws Exception {
+    // Generate a minimal CVCA certificate for chip authentication/terminal authentication
+    // This allows the applet to pass the hasEACCertificate() check
+    KeyPairGenerator rsaGenerator = KeyPairGenerator.getInstance("RSA");
+    rsaGenerator.initialize(2048);
+    KeyPair cvcaKeyPair = rsaGenerator.generateKeyPair();
+    RSAPublicKey rsaPublicKey = (RSAPublicKey) cvcaKeyPair.getPublic();
+
+    String country = "UT";
+    String mnemonic = "EMRTD";
+    String sequence = "00001";
+
+    CAReferenceField caReference = new CAReferenceField(country, mnemonic, sequence);
+    HolderReferenceField holderReference = new HolderReferenceField(country, mnemonic, sequence);
+
+    Date notBefore = new Date();
+    Date notAfter = new Date(System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000);
+
+    CVCPublicKey cvcPublicKey = KeyFactory.createInstance(rsaPublicKey, "SHA1withRSA", AuthorizationRoleEnum.CVCA);
+    CVCertificateBody body = new CVCertificateBody(
+        caReference,
+        cvcPublicKey,
+        holderReference,
+        AuthorizationRoleEnum.CVCA,
+        AccessRightEnum.READ_ACCESS_DG3_AND_DG4,
+        notBefore,
+        notAfter);
+
+    CVCertificate certificate = new CVCertificate(body);
+    Signature signature = Signature.getInstance("SHA1withRSA");
+    signature.initSign(cvcaKeyPair.getPrivate());
+    signature.update(certificate.getTBS());
+    certificate.setSignature(signature.sign());
+
+    byte[] cvcBytes = certificate.getDEREncoded();
+    // P1=0x00 means this is the root CVCA certificate
+    int sw = putData(ch, 0x00, 0x64, cvcBytes, "PUT CVCA certificate");
+    if (sw != 0x9000) {
+      throw new RuntimeException(String.format("Failed to seed CVCA certificate (SW=%04X)", sw));
+    }
+    System.out.println("Successfully seeded CVCA root certificate");
+  }
+
   private static byte[] buildRsaPrivateKeyTlv(int containerTag, byte[] keyBytes) {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     writeTag(out, containerTag);
@@ -708,6 +792,81 @@ public final class SimRunner {
     writeTag(out, 0x04);
     writeLength(out, keyBytes.length);
     out.write(keyBytes, 0, keyBytes.length);
+    return out.toByteArray();
+  }
+
+  private static byte[] buildEcPrivateKeyTlv(ECPublicKey ecPublicKey, PrivateKey privateKey) throws Exception {
+    if (!(privateKey instanceof ECPrivateKey)) {
+      throw new IllegalArgumentException("Private key must be ECPrivateKey");
+    }
+    ECPrivateKey ecPrivateKey = (ECPrivateKey) privateKey;
+    ECParameterSpec params = ecPublicKey.getParams();
+    EllipticCurve curve = params.getCurve();
+    ECPoint generator = params.getGenerator();
+
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+    // 0x81: Prime field P (using standard curve primes based on field size)
+    int fieldSize = curve.getField().getFieldSize();
+    byte[] prime;
+    if (fieldSize == 256) {
+      // P-256 (secp256r1) prime
+      prime = stripLeadingZero(new BigInteger("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16).toByteArray());
+    } else if (fieldSize == 384) {
+      // P-384 (secp384r1) prime
+      prime = stripLeadingZero(new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFF0000000000000000FFFFFFFF", 16).toByteArray());
+    } else if (fieldSize == 521) {
+      // P-521 (secp521r1) prime
+      prime = stripLeadingZero(new BigInteger("01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", 16).toByteArray());
+    } else {
+      throw new IllegalArgumentException("Unsupported EC curve field size: " + fieldSize);
+    }
+    writeTag(out, 0x81);
+    writeLength(out, prime.length);
+    out.write(prime, 0, prime.length);
+
+    // 0x82: Coefficient A
+    byte[] a = stripLeadingZero(curve.getA().toByteArray());
+    writeTag(out, 0x82);
+    writeLength(out, a.length);
+    out.write(a, 0, a.length);
+
+    // 0x83: Coefficient B
+    byte[] b = stripLeadingZero(curve.getB().toByteArray());
+    writeTag(out, 0x83);
+    writeLength(out, b.length);
+    out.write(b, 0, b.length);
+
+    // 0x84: Generator G (uncompressed point format: 0x04 || X || Y)
+    byte[] gx = stripLeadingZero(generator.getAffineX().toByteArray());
+    byte[] gy = stripLeadingZero(generator.getAffineY().toByteArray());
+    int coordSize = (curve.getField().getFieldSize() + 7) / 8;
+    byte[] g = new byte[1 + coordSize * 2];
+    g[0] = 0x04; // Uncompressed point
+    System.arraycopy(gx, 0, g, 1 + coordSize - gx.length, gx.length);
+    System.arraycopy(gy, 0, g, 1 + coordSize + coordSize - gy.length, gy.length);
+    writeTag(out, 0x84);
+    writeLength(out, g.length);
+    out.write(g, 0, g.length);
+
+    // 0x85: Order R
+    byte[] r = stripLeadingZero(params.getOrder().toByteArray());
+    writeTag(out, 0x85);
+    writeLength(out, r.length);
+    out.write(r, 0, r.length);
+
+    // 0x86: Private key S
+    byte[] s = stripLeadingZero(ecPrivateKey.getS().toByteArray());
+    writeTag(out, 0x86);
+    writeLength(out, s.length);
+    out.write(s, 0, s.length);
+
+    // 0x87: Cofactor (h = 1 for most curves)
+    writeTag(out, 0x87);
+    writeLength(out, 2);
+    out.write(0x00);
+    out.write(params.getCofactor());
+
     return out.toByteArray();
   }
 
