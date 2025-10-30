@@ -76,9 +76,15 @@ class ScenarioRunnerIntegrationTest {
         "Issuer CSCA should be wired as a trust source when reusing artifacts");
 
     Method runSim = ScenarioRunner.class.getDeclaredMethod(
-        "runSimStep", ScenarioStep.class, SimConfig.class, IssuerSimulator.Result.class, ScenarioExecutionListener.class);
+        "runSimStep",
+        SimRunner.class,
+        ScenarioStep.class,
+        SimConfig.class,
+        IssuerSimulator.Result.class,
+        ScenarioExecutionListener.class);
     runSim.setAccessible(true);
-    SessionReport report = (SessionReport) runSim.invoke(runner, readScenarioStep, config, issuerResult, listener);
+    SessionReport report =
+        (SessionReport) runSim.invoke(runner, new SimRunner(), readScenarioStep, config, issuerResult, listener);
     assertNotNull(report, "Read step should emit a session report");
 
     PersonalizationJob job = issuerResult.getJob();
@@ -257,6 +263,102 @@ class ScenarioRunnerIntegrationTest {
         (IssuerSimulator.Result) resolveReuse.invoke(runner, taReadStep, issuerResult, listener);
 
     assertNull(resolved, "Steps marked as fresh should not reuse issuer personalization");
+  }
+
+  @Test
+  void passiveAuthPresetsRequestFreshCardsWhenIssuerCached() throws Exception {
+    ScenarioRunner runner = new ScenarioRunner();
+    AdvancedOptionsSnapshot options = emptyAdvancedOptions();
+
+    Path issuerOutput = Files.createTempDirectory("scenario-runner-passive-issuer");
+    ScenarioStep issuerStep = new ScenarioStep(
+        "Issue document",
+        "emu.IssuerMain",
+        List.of("--output=" + issuerOutput, "--lifecycle=PERSONALIZED", "--lifecycle=LOCKED"),
+        false);
+
+    RecordingListener issuerListener = new RecordingListener();
+    Method runIssuer = ScenarioRunner.class.getDeclaredMethod(
+        "runIssuerStep", ScenarioStep.class, AdvancedOptionsSnapshot.class, ScenarioExecutionListener.class);
+    runIssuer.setAccessible(true);
+    IssuerSimulator.Result issuerResult =
+        (IssuerSimulator.Result) runIssuer.invoke(runner, issuerStep, options, issuerListener);
+
+    List<String> presetNames = List.of(
+        "Passive Authentication (tamper detection)",
+        "Passive Authentication (missing trust anchors)");
+
+    for (String presetName : presetNames) {
+      ScenarioPreset preset = ScenarioPresets.all().stream()
+          .filter(p -> p.getName().equals(presetName))
+          .findFirst()
+          .orElseThrow(() -> new IllegalStateException("Missing preset " + presetName));
+
+      RecordingListener listener = new RecordingListener();
+      Path reportPath = Files.createTempFile("scenario-runner-passive", ".json");
+      Task<ScenarioResult> task = runner.createTask(preset, options, reportPath, listener, issuerResult);
+
+      Method call = task.getClass().getDeclaredMethod("call");
+      call.setAccessible(true);
+      ScenarioResult result = (ScenarioResult) call.invoke(task);
+
+      assertFalse(result.isSuccess(), presetName + " should fail when Passive Authentication errors are expected");
+      assertEquals("Run ReadDG1Main", result.getFailedStep(), "Read step should be marked as failed");
+      assertTrue(
+          listener.logs.stream().anyMatch(log -> log.contains("cached issuer result will not be reused")),
+          "Scenario should skip cached issuer personalization for " + presetName);
+    }
+  }
+
+  @Test
+  void issuerScenarioRecoversAfterPassiveFailure() throws Exception {
+    ScenarioRunner runner = new ScenarioRunner();
+    AdvancedOptionsSnapshot options = emptyAdvancedOptions();
+
+    Path issuerOutput = Files.createTempDirectory("scenario-runner-issuer-recovery");
+    ScenarioStep issuerStep = new ScenarioStep(
+        "Issue document",
+        "emu.IssuerMain",
+        List.of("--output=" + issuerOutput, "--lifecycle=PERSONALIZED", "--lifecycle=LOCKED"),
+        false);
+
+    RecordingListener issuerListener = new RecordingListener();
+    Method runIssuer = ScenarioRunner.class.getDeclaredMethod(
+        "runIssuerStep", ScenarioStep.class, AdvancedOptionsSnapshot.class, ScenarioExecutionListener.class);
+    runIssuer.setAccessible(true);
+    IssuerSimulator.Result issuerResult =
+        (IssuerSimulator.Result) runIssuer.invoke(runner, issuerStep, options, issuerListener);
+
+    ScenarioPreset passivePreset = ScenarioPresets.all().stream()
+        .filter(p -> p.getName().equals("Passive Authentication (tamper detection)"))
+        .findFirst()
+        .orElseThrow();
+
+    RecordingListener passiveListener = new RecordingListener();
+    Path passiveReport = Files.createTempFile("scenario-runner-passive-recovery", ".json");
+    Task<ScenarioResult> passiveTask = runner.createTask(passivePreset, options, passiveReport, passiveListener, issuerResult);
+    Method call = passiveTask.getClass().getDeclaredMethod("call");
+    call.setAccessible(true);
+    ScenarioResult passiveResult = (ScenarioResult) call.invoke(passiveTask);
+    assertFalse(passiveResult.isSuccess(), "Passive preset should fail to simulate corruption");
+    assertTrue(
+        passiveListener.logs.stream().anyMatch(log -> log.contains("cached issuer result will not be reused")),
+        "Passive preset should skip cached issuer personalization");
+
+    ScenarioPreset issuerPreset = ScenarioPresets.all().stream()
+        .filter(p -> p.getName().equals("Issuer: Full LDS"))
+        .findFirst()
+        .orElseThrow();
+
+    RecordingListener recoveryListener = new RecordingListener();
+    Path recoveryReport = Files.createTempFile("scenario-runner-issuer-recovery", ".json");
+    Task<ScenarioResult> issuerTask = runner.createTask(issuerPreset, options, recoveryReport, recoveryListener, issuerResult);
+    ScenarioResult recoveryResult = (ScenarioResult) call.invoke(issuerTask);
+
+    assertTrue(recoveryResult.isSuccess(), "Issuer scenario should succeed after passive failure");
+    assertTrue(
+        recoveryResult.getIssuerResult().isPresent(),
+        "Issuer scenario should produce a personalization result");
   }
 
   private static AdvancedOptionsSnapshot emptyAdvancedOptions() {

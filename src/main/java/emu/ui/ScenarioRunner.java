@@ -40,8 +40,6 @@ final class ScenarioRunner {
 
   private final Path projectDirectory = Paths.get("").toAbsolutePath();
   private final String javaExecutable;
-  private final SimRunner simRunner = new SimRunner();
-
   ScenarioRunner() {
     String javaHome = System.getProperty("java.home");
     javaExecutable = Paths.get(javaHome, "bin", "java").toString();
@@ -67,6 +65,8 @@ final class ScenarioRunner {
     Objects.requireNonNull(listener, "listener");
 
     boolean prepareMissingTrustStore = shouldPrepareMissingTrustStore(preset, advancedOptions);
+
+    SimRunner simRunner = new SimRunner();
 
     return new Task<>() {
       @Override
@@ -99,7 +99,7 @@ final class ScenarioRunner {
             try {
               IssuerSimulator.Result reusedIssuer = resolveIssuerReuse(step, finalIssuerResult, listener);
               SimConfig config = buildSimConfig(step, advancedOptions, reportPath, reusedIssuer);
-              finalReport = runSimStep(step, config, reusedIssuer, listener);
+              finalReport = runSimStep(simRunner, step, config, reusedIssuer, listener);
             } catch (Exception e) {
               listener.onLog(SimLogCategory.GENERAL, step.getName(), "Error: " + e.getMessage());
               exitCode = 1;
@@ -192,6 +192,7 @@ final class ScenarioRunner {
   }
 
   private SessionReport runSimStep(
+      SimRunner simRunner,
       ScenarioStep step,
       SimConfig config,
       IssuerSimulator.Result issuerResult,
