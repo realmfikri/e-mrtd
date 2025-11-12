@@ -223,8 +223,37 @@ public final class PersonalizationJob {
     }
 
     public Builder withMrzInfo(MRZInfo mrzInfo) {
-      this.mrzInfo = Objects.requireNonNull(mrzInfo, "mrzInfo");
+      this.mrzInfo = normalizeMrzInfo(Objects.requireNonNull(mrzInfo, "mrzInfo"));
       return this;
+    }
+
+    private static MRZInfo normalizeMrzInfo(MRZInfo mrzInfo) {
+      String documentCode = mrzInfo.getDocumentCode();
+      String normalizedDocumentNumber =
+          MrzUtil.ensureDocumentNumberLength(mrzInfo.getDocumentNumber(), documentCode);
+      return new MRZInfo(
+          documentCode,
+          mrzInfo.getIssuingState(),
+          mrzInfo.getPrimaryIdentifier(),
+          mrzInfo.getSecondaryIdentifier(),
+          normalizedDocumentNumber,
+          mrzInfo.getNationality(),
+          mrzInfo.getDateOfBirth(),
+          mrzInfo.getGender(),
+          mrzInfo.getDateOfExpiry(),
+          extractOptionalData(mrzInfo));
+    }
+
+    private static String extractOptionalData(MRZInfo mrzInfo) {
+      try {
+        return (String) MRZInfo.class.getMethod("getOptionalData").invoke(mrzInfo);
+      } catch (ReflectiveOperationException ignored) {
+        try {
+          return (String) MRZInfo.class.getMethod("getPersonalNumber").invoke(mrzInfo);
+        } catch (ReflectiveOperationException ignoredAgain) {
+          return "";
+        }
+      }
     }
 
     public Builder enableDataGroup(int number, boolean enabled) {
