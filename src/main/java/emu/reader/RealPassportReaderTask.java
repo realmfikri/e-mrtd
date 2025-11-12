@@ -1,5 +1,6 @@
 package emu.reader;
 
+import emu.MrzUtil;
 import javafx.concurrent.Task;
 
 import java.io.ByteArrayInputStream;
@@ -116,6 +117,8 @@ public class RealPassportReaderTask extends Task<RealPassportSnapshot> {
                 mrzText = mrzInfo == null ? null : mrzInfo.toString();
             }
 
+            String derivedDocumentNumber = MrzUtil.deriveDocumentNumber(mrzInfo, mrzText, documentNumber);
+
             String fullName = "";
             String nationality = "";
             if (mrzInfo != null) {
@@ -172,7 +175,7 @@ public class RealPassportReaderTask extends Task<RealPassportSnapshot> {
 
             updateMessage("Passport read complete");
             return new RealPassportSnapshot(
-                    documentNumber,
+                    derivedDocumentNumber,
                     dateOfBirth,
                     dateOfExpiry,
                     mrzText,
