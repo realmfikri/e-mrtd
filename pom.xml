@@ -59,9 +59,14 @@
       <version>${jackson.version}</version>
     </dependency>
     <dependency>
-    <groupId>net.sf.scuba</groupId>
-    <artifactId>scuba-sc-j2se</artifactId>
-    <version>0.0.16</version>
+      <groupId>net.sf.scuba</groupId>
+      <artifactId>scuba-sc-j2se</artifactId>
+      <version>0.0.21</version>
+    </dependency>
+    <dependency>
+      <groupId>commons-logging</groupId>
+      <artifactId>commons-logging</artifactId>
+      <version>1.2</version>
     </dependency>
     <dependency>
       <groupId>com.github.jai-imageio</groupId>
