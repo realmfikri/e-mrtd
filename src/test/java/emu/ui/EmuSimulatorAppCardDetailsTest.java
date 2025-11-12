@@ -91,7 +91,7 @@ class EmuSimulatorAppCardDetailsTest {
     EmuSimulatorApp app = new EmuSimulatorApp();
 
     Method updateMethod = EmuSimulatorApp.class.getDeclaredMethod(
-        "updateCardDetailsTab", SessionReportViewData.class, IssuerSimulator.Result.class);
+        "updateCardDetailsTab", SessionReportViewData.class, IssuerSimulator.Result.class, boolean.class);
     updateMethod.setAccessible(true);
 
     Field terminalImageField = EmuSimulatorApp.class.getDeclaredField("terminalFacePreviewImage");
@@ -108,7 +108,7 @@ class EmuSimulatorAppCardDetailsTest {
         }
       });
       try {
-        updateMethod.invoke(app, viewData, null);
+        updateMethod.invoke(app, viewData, null, false);
       } catch (Throwable t) {
         error.set(t);
         imageLatch.countDown();
@@ -180,7 +180,7 @@ class EmuSimulatorAppCardDetailsTest {
     EmuSimulatorApp app = new EmuSimulatorApp();
 
     Method updateMethod = EmuSimulatorApp.class.getDeclaredMethod(
-        "updateCardDetailsTab", SessionReportViewData.class, IssuerSimulator.Result.class);
+        "updateCardDetailsTab", SessionReportViewData.class, IssuerSimulator.Result.class, boolean.class);
     updateMethod.setAccessible(true);
 
     Field cardImageField = EmuSimulatorApp.class.getDeclaredField("cardPortraitImage");
@@ -197,7 +197,7 @@ class EmuSimulatorAppCardDetailsTest {
         }
       });
       try {
-        updateMethod.invoke(app, viewData, null);
+        updateMethod.invoke(app, viewData, null, false);
       } catch (Throwable t) {
         error.set(t);
         imageLatch.countDown();

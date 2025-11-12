@@ -95,6 +95,7 @@ public final class EmuSimulatorApp extends Application {
   private final ProgressIndicator realReaderProgress = new ProgressIndicator();
   private final Button copyMrzToAdvancedButton = new Button("Copy MRZ to advanced toggles");
   private final Button copyLdsToSimulatorButton = new Button("Copy full LDS to simulator");
+  private final Label realDataOverlayWarningLabel = new Label();
   private final Label verdictValue = valueLabel();
   private final Label smModeValue = valueLabel();
   private final Label paceValue = valueLabel();
@@ -185,6 +186,8 @@ public final class EmuSimulatorApp extends Application {
   private Runnable afterScenarioCallback;
   private BatchRunState batchRunState;
   private VBox scenarioButtonsBox;
+  private boolean realDataOverlayArmed;
+  private boolean lastScenarioUsedRealOverlay;
 
   @Override
   public void start(Stage stage) {
@@ -339,7 +342,20 @@ public final class EmuSimulatorApp extends Application {
     HBox controls = new HBox(12, readButton, realReaderProgress, copyMrzToAdvancedButton, copyLdsToSimulatorButton);
     controls.setAlignment(Pos.CENTER_LEFT);
 
-    container.getChildren().addAll(header, instructions, form, controls);
+    Label copyHelp = new Label(
+        "Copy MRZ moves just the textual MRZ fields into the advanced options. "
+            + "Copy full LDS hydrates the simulator with EF.COM, EF.SOD, and every data group captured from the passport read. "
+            + "Private keys remain on the physical passport, so Chip Authentication, Active Authentication, and Terminal Authentication scenarios will fail unless matching keys are injected manually.");
+    copyHelp.setWrapText(true);
+
+    realDataOverlayWarningLabel.setWrapText(true);
+    realDataOverlayWarningLabel.getStyleClass().add("warning-label");
+    realDataOverlayWarningLabel.setVisible(false);
+    realDataOverlayWarningLabel.setManaged(false);
+
+    VBox helpBox = new VBox(6, copyHelp, realDataOverlayWarningLabel);
+
+    container.getChildren().addAll(header, instructions, form, controls, helpBox);
 
     Tab tab = new Tab("Real Reader", container);
     tab.setClosable(false);
@@ -466,8 +482,36 @@ public final class EmuSimulatorApp extends Application {
     }
 
     pendingSimulatorProfile = lastRealPassportProfile;
-    statusLabel.setText("Captured LDS profile queued for next simulator run");
-    addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Queued captured LDS profile for simulator hydration");
+    statusLabel.setText(
+        "Captured LDS profile queued; AA/CA/TA will likely fail without matching private keys");
+    addLogEntry(
+        SimLogCategory.GENERAL,
+        "Real Reader",
+        "Queued captured LDS profile for simulator hydration (AA/CA/TA expected to fail without the passport's private keys)");
+    setRealDataOverlayArmed(true);
+  }
+
+  private void setRealDataOverlayArmed(boolean armed) {
+    realDataOverlayArmed = armed;
+    updateRealDataOverlayWarningLabel();
+  }
+
+  private void updateRealDataOverlayWarningLabel() {
+    if (!realDataOverlayArmed) {
+      realDataOverlayWarningLabel.setVisible(false);
+      realDataOverlayWarningLabel.setManaged(false);
+      return;
+    }
+    RealPassportProfile profile = pendingSimulatorProfile != null
+        ? pendingSimulatorProfile
+        : lastRealPassportProfile;
+    String docNumber = profile != null ? profile.getDocumentNumber() : null;
+    String target = hasText(docNumber) ? "document " + docNumber : "the captured passport";
+    realDataOverlayWarningLabel.setText(
+        "Real data overlay armed for " + target + ". The next simulator run will hydrate EF.COM, EF.SOD, and all captured data groups. "
+            + "Private keys for Chip, Active, and Terminal Authentication are not copied, so those flows are expected to fail unless matching keys are provided.");
+    realDataOverlayWarningLabel.setVisible(true);
+    realDataOverlayWarningLabel.setManaged(true);
   }
 
   private void clearRealReaderMrzSummary() {
@@ -548,9 +592,9 @@ public final class EmuSimulatorApp extends Application {
         null,             // terminalAuthRights
         List.of());       // terminalAuthWarnings
 
-    updateSummary(viewData);
+    updateSummary(viewData, false);
     updateDataGroups(viewData);
-    updateCardDetailsTab(viewData, lastIssuerResult);
+    updateCardDetailsTab(viewData, lastIssuerResult, false);
 
     if (resultTabs != null && cardDetailsTab != null) {
       resultTabs.getSelectionModel().select(cardDetailsTab);
@@ -824,6 +868,14 @@ public final class EmuSimulatorApp extends Application {
           SimLogCategory.GENERAL,
           preset.getName(),
           "Using captured LDS profile for simulator hydration");
+      addLogEntry(
+          SimLogCategory.GENERAL,
+          preset.getName(),
+          "Chip/Active/Terminal Authentication likely to fail: real passports do not export the private keys required for these steps");
+      lastScenarioUsedRealOverlay = true;
+      setRealDataOverlayArmed(false);
+    } else {
+      lastScenarioUsedRealOverlay = false;
     }
 
     Path reportPath = buildReportPath(preset.getName());
@@ -1007,7 +1059,7 @@ public final class EmuSimulatorApp extends Application {
     lastReportPath = result.getReportPath();
     lastIssuerResult = result.getIssuerResult().orElse(null);
     updateIssuerTab(lastIssuerResult);
-    updateCardDetailsTab(null, lastIssuerResult);
+    updateCardDetailsTab(null, lastIssuerResult, false);
 
     if (!result.isSuccess()) {
       String failureMsg = "Scenario failed";
@@ -1031,9 +1083,9 @@ public final class EmuSimulatorApp extends Application {
     if (report != null) {
       SessionReportViewData viewData = SessionReportParser.fromReport(report);
       if (viewData != null) {
-        updateSummary(viewData);
+        updateSummary(viewData, lastScenarioUsedRealOverlay);
         updateDataGroups(viewData);
-        updateCardDetailsTab(viewData, lastIssuerResult);
+        updateCardDetailsTab(viewData, lastIssuerResult, lastScenarioUsedRealOverlay);
       }
       lastReport = report;
       exportButton.setDisable(false);
@@ -1042,9 +1094,9 @@ public final class EmuSimulatorApp extends Application {
       try {
         SessionReportViewData viewData = SessionReportParser.parse(result.getReportPath());
         if (viewData != null) {
-          updateSummary(viewData);
+          updateSummary(viewData, lastScenarioUsedRealOverlay);
           updateDataGroups(viewData);
-          updateCardDetailsTab(viewData, lastIssuerResult);
+          updateCardDetailsTab(viewData, lastIssuerResult, lastScenarioUsedRealOverlay);
           exportButton.setDisable(false);
           copySessionInfoButton.setDisable(false);
         } else {
@@ -1122,7 +1174,7 @@ public final class EmuSimulatorApp extends Application {
     }
   }
 
-  private void updateSummary(SessionReportViewData data) {
+  private void updateSummary(SessionReportViewData data, boolean overlayNote) {
     verdictValue.setText(orDefault(data.getPassiveAuthVerdict()));
     String smMode = data.getSecureMessagingMode();
     if (smMode == null || smMode.isBlank()) {
@@ -1132,9 +1184,9 @@ public final class EmuSimulatorApp extends Application {
     }
     paceValue.setText(String.format("Attempted: %s | Established: %s",
         yesNo(data.isPaceAttempted()), yesNo(data.isPaceEstablished())));
-    caValue.setText("Established: " + yesNo(data.isCaEstablished()));
-    aaValue.setText(buildActiveAuthSummary(data));
-    terminalAuthValue.setText(buildTerminalAuthSummary(data));
+    caValue.setText(buildChipAuthSummary(data, overlayNote));
+    aaValue.setText(buildActiveAuthSummary(data, overlayNote));
+    terminalAuthValue.setText(buildTerminalAuthSummary(data, overlayNote));
   }
 
   private void updateDataGroups(SessionReportViewData data) {
@@ -1333,25 +1385,40 @@ public final class EmuSimulatorApp extends Application {
     return sb.toString();
   }
 
-  private String buildActiveAuthSummary(SessionReportViewData data) {
+  private String buildChipAuthSummary(SessionReportViewData data, boolean overlayNote) {
     if (data == null) {
       return "—";
     }
-    return String.format(
+    String summary = "Established: " + yesNo(data.isCaEstablished());
+    if (overlayNote && !data.isCaEstablished() && data.getPresentDataGroups().contains(14)) {
+      summary += " | Note: real data overlay did not import the chip authentication private key.";
+    }
+    return summary;
+  }
+
+  private String buildActiveAuthSummary(SessionReportViewData data, boolean overlayNote) {
+    if (data == null) {
+      return "—";
+    }
+    String summary = String.format(
         "Enabled: %s | Supported: %s | Verified: %s | Algorithm: %s",
         yesNo(data.isActiveAuthEnabled()),
         yesNo(data.isActiveAuthSupported()),
         yesNo(data.isActiveAuthVerified()),
         orDefault(data.getActiveAuthAlgorithm()));
+    if (overlayNote && data.isActiveAuthEnabled() && !data.isActiveAuthVerified()) {
+      summary += " | Note: real data overlay omits the chip's Active Authentication key.";
+    }
+    return summary;
   }
 
-  private String buildTerminalAuthSummary(SessionReportViewData data) {
+  private String buildTerminalAuthSummary(SessionReportViewData data, boolean overlayNote) {
     if (data == null) {
       return "—";
     }
     String rightsSummary = formatTerminalAuthRights(data.getTerminalAuthRole(), data.getTerminalAuthRights());
     String warningsSummary = formatTerminalAuthWarnings(data.getTerminalAuthWarnings());
-    return String.format(
+    String summary = String.format(
         "Attempted: %s | Succeeded: %s | DG3 unlocked: %s | DG4 unlocked: %s | Rights: %s | Warnings: %s",
         yesNo(data.isTerminalAuthAttempted()),
         yesNo(data.isTerminalAuthSucceeded()),
@@ -1359,6 +1426,10 @@ public final class EmuSimulatorApp extends Application {
         yesNo(data.isTerminalAuthDg4Unlocked()),
         rightsSummary,
         warningsSummary);
+    if (overlayNote && data.isTerminalAuthAttempted() && !data.isTerminalAuthSucceeded()) {
+      summary += " | Note: inject a matching terminal private key when using a real data overlay.";
+    }
+    return summary;
   }
 
   private String formatTerminalAuthRights(String role, String rights) {
@@ -1624,6 +1695,10 @@ public final class EmuSimulatorApp extends Application {
     return trimmed.isEmpty() ? null : trimmed;
   }
 
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
+  }
+
   private void showAlert(Alert.AlertType type, String title, String message) {
     Alert alert = new Alert(type);
     alert.initOwner(primaryStage);
@@ -1886,7 +1961,10 @@ public final class EmuSimulatorApp extends Application {
     }
   }
 
-  private void updateCardDetailsTab(SessionReportViewData readerData, IssuerSimulator.Result issuerResult) {
+  private void updateCardDetailsTab(
+      SessionReportViewData readerData,
+      IssuerSimulator.Result issuerResult,
+      boolean overlayNote) {
     boolean hasIssuer = issuerResult != null;
     if (readerData == null || readerData.getMrzSummary() == null) {
       clearRealReaderMrzSummary();
@@ -1957,8 +2035,8 @@ public final class EmuSimulatorApp extends Application {
       terminalSecureMessagingModeValue.setText(orDefault(readerData.getSecureMessagingMode()));
       terminalPaceStatusValue.setText(String.format("Attempted: %s | Established: %s",
           yesNo(readerData.isPaceAttempted()), yesNo(readerData.isPaceEstablished())));
-      terminalChipAuthStatusValue.setText("Established: " + yesNo(readerData.isCaEstablished()));
-      terminalActiveAuthStatusValue.setText(buildActiveAuthSummary(readerData));
+      terminalChipAuthStatusValue.setText(buildChipAuthSummary(readerData, overlayNote));
+      terminalActiveAuthStatusValue.setText(buildActiveAuthSummary(readerData, overlayNote));
       terminalDigestAlgorithmValue.setText(orDefault(readerData.getPassiveAuthAlgorithm()));
       terminalPaDataGroupsValue.setText(String.format(
           "OK: %s%nBad: %s%nMissing: %s%nLocked: %s",
