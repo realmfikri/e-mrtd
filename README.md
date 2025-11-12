@@ -68,6 +68,12 @@ The main entry point is `emu.ReadDG1Main`, executing personalization + verificat
 > ℹ️ **Heads-up:** Run `mvn -q -DskipTests package` once after cloning or editing the project so the CLI classes are compiled
 > before invoking any of the scenarios below.
 
+### Real Reader Tab (JavaFX UI)
+- Launch the JavaFX UI (`mvn javafx:run`) and switch to the **Real Reader** tab when you are ready to interact with a physical passport.
+- Enter the MRZ **document number**, **date of birth (YYMMDD)**, and **date of expiry (YYMMDD)** before starting the read; the UI validates these values before attempting Basic Access Control.
+- Place an ePassport on a **PC/SC-compatible ISO 14443 contactless reader** that the host exposes through `javax.smartcardio` (e.g., Identiv SCL3711, ACS ACR1255U). Install vendor drivers if your platform does not bundle them.
+- Press **Read passport** to load the BouncyCastle provider (if needed), wait for the NFC reader to detect a document, perform BAC with the supplied MRZ keys, and populate the simulator tabs with live data (MRZ summary, DG2 portrait when present, logs).
+
 ### Happy Path (Issuance + PA Verification)
 ```bash
 mvn -q exec:java -Dexec.mainClass=emu.ReadDG1Main -Dexec.args='--seed --require-pa'
