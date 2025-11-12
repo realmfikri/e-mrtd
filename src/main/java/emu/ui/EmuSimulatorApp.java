@@ -5,8 +5,8 @@ import emu.PersonalizationJob;
 import emu.SessionReport;
 import emu.SimLogCategory;
 import emu.SimPhase;
-import emu.reader.PassportData;
 import emu.reader.RealPassportReaderTask;
+import emu.reader.RealPassportSnapshot;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -166,7 +166,8 @@ public final class EmuSimulatorApp extends Application {
   private static final String DG1_NOT_READ_PLACEHOLDER = "(DG1 not read)";
 
   private Task<ScenarioResult> currentTask;
-  private Task<PassportData> currentReaderTask;
+  private Task<RealPassportSnapshot> currentReaderTask;
+  private RealPassportSnapshot lastRealPassportSnapshot;
   private List<String> lastCommands = List.of();
   private SessionReport lastReport;
   private IssuerSimulator.Result lastIssuerResult;
@@ -373,6 +374,7 @@ public final class EmuSimulatorApp extends Application {
         dateOfExpiry,
         message -> Platform.runLater(() -> addLogEntry(SimLogCategory.GENERAL, "Real Reader", message)));
 
+    lastRealPassportSnapshot = null;
     currentReaderTask = task;
     addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Starting passport read");
 
@@ -396,7 +398,7 @@ public final class EmuSimulatorApp extends Application {
       realReaderProgress.setManaged(false);
       currentReaderTask = null;
 
-      PassportData data = task.getValue();
+      RealPassportSnapshot data = task.getValue();
       if (data != null && data.isValid()) {
         handleRealPassportData(data);
         statusLabel.setText("Passport read complete");
@@ -428,7 +430,8 @@ public final class EmuSimulatorApp extends Application {
     thread.start();
   }
 
-  private void handleRealPassportData(PassportData data) {
+  private void handleRealPassportData(RealPassportSnapshot data) {
+    lastRealPassportSnapshot = data;
     SessionReportViewData.MrzSummary mrzSummary = buildMrzSummary(data);
 
     List<Integer> presentDataGroups = new ArrayList<>();
@@ -1561,7 +1564,7 @@ public final class EmuSimulatorApp extends Application {
     alert.showAndWait();
   }
 
-  private SessionReportViewData.MrzSummary buildMrzSummary(PassportData data) {
+  private SessionReportViewData.MrzSummary buildMrzSummary(RealPassportSnapshot data) {
     String documentNumber = data.documentNumber();
     String dateOfBirth = data.dateOfBirth();
     String dateOfExpiry = data.dateOfExpiry();
