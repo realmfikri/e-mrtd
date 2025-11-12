@@ -1,5 +1,6 @@
 package emu.ui;
 
+import emu.MrzUtil;
 import emu.SimConfig;
 
 import java.nio.file.Path;
@@ -205,6 +206,10 @@ final class AdvancedOptionsSnapshot {
 
   String getDocumentNumber() {
     return documentNumber;
+  }
+
+  String getDocumentNumberDisplay() {
+    return MrzUtil.stripTrailingFillers(documentNumber);
   }
 
   String getIssuingState() {

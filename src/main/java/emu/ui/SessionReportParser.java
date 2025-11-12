@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import emu.MrzUtil;
 import emu.SessionReport;
 
 import java.io.IOException;
@@ -130,8 +131,11 @@ final class SessionReportParser {
     if (rawMrz == null) {
       return null;
     }
+    String documentNumberMrz = rawMrz.documentNumber;
+    String documentNumber = MrzUtil.stripTrailingFillers(documentNumberMrz);
     return new SessionReportViewData.MrzSummary(
-        rawMrz.documentNumber,
+        documentNumber,
+        documentNumberMrz,
         rawMrz.dateOfBirth,
         rawMrz.dateOfExpiry,
         rawMrz.primaryIdentifier,
@@ -144,8 +148,11 @@ final class SessionReportParser {
     if (summary == null) {
       return null;
     }
+    String documentNumberMrz = summary.documentNumber;
+    String documentNumber = MrzUtil.stripTrailingFillers(documentNumberMrz);
     return new SessionReportViewData.MrzSummary(
-        summary.documentNumber,
+        documentNumber,
+        documentNumberMrz,
         summary.dateOfBirth,
         summary.dateOfExpiry,
         summary.primaryIdentifier,

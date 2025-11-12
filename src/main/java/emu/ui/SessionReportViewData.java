@@ -1,5 +1,7 @@
 package emu.ui;
 
+import emu.MrzUtil;
+
 import java.util.List;
 
 final class SessionReportViewData {
@@ -220,6 +222,7 @@ final class SessionReportViewData {
 
   static final class MrzSummary {
     private final String documentNumber;
+    private final String documentNumberMrz;
     private final String dateOfBirth;
     private final String dateOfExpiry;
     private final String primaryIdentifier;
@@ -230,6 +233,7 @@ final class SessionReportViewData {
     private final String gender;
 
     MrzSummary(String documentNumber,
+               String documentNumberMrz,
                String dateOfBirth,
                String dateOfExpiry,
                String primaryIdentifier,
@@ -237,6 +241,7 @@ final class SessionReportViewData {
                String issuingState,
                String nationality) {
       this(documentNumber,
+          documentNumberMrz,
           dateOfBirth,
           dateOfExpiry,
           primaryIdentifier,
@@ -248,6 +253,7 @@ final class SessionReportViewData {
     }
 
     MrzSummary(String documentNumber,
+               String documentNumberMrz,
                String dateOfBirth,
                String dateOfExpiry,
                String primaryIdentifier,
@@ -256,7 +262,10 @@ final class SessionReportViewData {
                String nationality,
                String documentType,
                String gender) {
-      this.documentNumber = documentNumber;
+      this.documentNumber = documentNumber != null
+          ? documentNumber
+          : MrzUtil.stripTrailingFillers(documentNumberMrz);
+      this.documentNumberMrz = documentNumberMrz != null ? documentNumberMrz : documentNumber;
       this.dateOfBirth = dateOfBirth;
       this.dateOfExpiry = dateOfExpiry;
       this.primaryIdentifier = primaryIdentifier;
@@ -269,6 +278,14 @@ final class SessionReportViewData {
 
     String getDocumentNumber() {
       return documentNumber;
+    }
+
+    String getDocumentNumberMrz() {
+      return documentNumberMrz;
+    }
+
+    int getDocumentNumberMrzLength() {
+      return documentNumberMrz != null ? documentNumberMrz.length() : 0;
     }
 
     String getDateOfBirth() {
