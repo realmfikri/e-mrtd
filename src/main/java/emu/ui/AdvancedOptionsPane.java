@@ -125,6 +125,17 @@ final class AdvancedOptionsPane extends TitledPane {
     setComboBoxValue(genderBox, summary.getGender());
   }
 
+  void setFaceOverride(String path, Integer width, Integer height) {
+    setTextField(facePathField, hasText(path) ? path : null);
+    if (width != null && height != null) {
+      setTextField(faceWidthField, Integer.toString(width));
+      setTextField(faceHeightField, Integer.toString(height));
+    } else {
+      setTextField(faceWidthField, null);
+      setTextField(faceHeightField, null);
+    }
+  }
+
   void clearMrzInputs() {
     expectedMrzDocumentNumberLength = 0;
     setComboBoxValue(documentTypeBox, null);

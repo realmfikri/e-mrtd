@@ -47,6 +47,7 @@ import javafx.util.Callback;
 import org.jmrtd.BACKey;
 import org.jmrtd.lds.icao.MRZInfo;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -177,6 +178,9 @@ public final class EmuSimulatorApp extends Application {
   private RealPassportProfile lastRealPassportProfile;
   private RealPassportProfile pendingSimulatorProfile;
   private SessionReportViewData.MrzSummary lastRealReaderMrzSummary;
+  private String lastRealReaderFacePreviewPath;
+  private Integer lastRealReaderFaceWidth;
+  private Integer lastRealReaderFaceHeight;
   private List<String> lastCommands = List.of();
   private SessionReport lastReport;
   private IssuerSimulator.Result lastIssuerResult;
@@ -471,6 +475,10 @@ public final class EmuSimulatorApp extends Application {
     }
 
     advancedOptionsPane.applyMrzSummary(summary);
+    advancedOptionsPane.setFaceOverride(
+        lastRealReaderFacePreviewPath,
+        lastRealReaderFaceWidth,
+        lastRealReaderFaceHeight);
     statusLabel.setText("MRZ values copied to advanced toggles");
     addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Copied MRZ data to advanced toggles");
   }
@@ -518,6 +526,8 @@ public final class EmuSimulatorApp extends Application {
   private void clearRealReaderMrzSummary() {
     lastRealReaderMrzSummary = null;
     copyMrzToAdvancedButton.setDisable(true);
+    clearRealReaderFacePreview();
+    advancedOptionsPane.setFaceOverride(null, null, null);
     clearRealPassportProfile();
   }
 
@@ -526,11 +536,19 @@ public final class EmuSimulatorApp extends Application {
     copyLdsToSimulatorButton.setDisable(true);
   }
 
+  private void clearRealReaderFacePreview() {
+    lastRealReaderFacePreviewPath = null;
+    lastRealReaderFaceWidth = null;
+    lastRealReaderFaceHeight = null;
+  }
+
   private void handleRealPassportData(RealPassportSnapshot data) {
     lastRealPassportSnapshot = data;
     lastRealPassportProfile = buildRealPassportProfile(data);
     copyLdsToSimulatorButton.setDisable(lastRealPassportProfile == null);
     SessionReportViewData.MrzSummary mrzSummary = buildMrzSummary(data);
+
+    clearRealReaderFacePreview();
 
     if (mrzSummary != null) {
       lastRealReaderMrzSummary = mrzSummary;
@@ -555,6 +573,20 @@ public final class EmuSimulatorApp extends Application {
         Path previewPath = facesDir.resolve(fileName);
         Files.write(previewPath, imageBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
         previewPathString = previewPath.toAbsolutePath().toString();
+        lastRealReaderFacePreviewPath = previewPathString;
+        try (ByteArrayInputStream previewStream = new ByteArrayInputStream(imageBytes)) {
+          Image fxImage = new Image(previewStream);
+          if (!fxImage.isError()) {
+            double width = fxImage.getWidth();
+            double height = fxImage.getHeight();
+            if (width > 0 && height > 0) {
+              lastRealReaderFaceWidth = (int) Math.round(width);
+              lastRealReaderFaceHeight = (int) Math.round(height);
+            }
+          }
+        } catch (Exception ex) {
+          addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Unable to determine face dimensions: " + ex.getMessage());
+        }
         presentDataGroups.add(2);
       } catch (IOException ex) {
         addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Unable to write face preview: " + ex.getMessage());

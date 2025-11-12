@@ -9,6 +9,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import emu.RealPassportProfile;
 import emu.reader.RealPassportSnapshot;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -28,6 +32,8 @@ class EmuSimulatorAppRealDataOverlayTest {
 
   private static final AtomicBoolean FX_INITIALIZED = new AtomicBoolean();
   private static volatile boolean fxAvailable = true;
+  private static final byte[] ONE_PIXEL_PNG = Base64.getDecoder().decode(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABDQottAAAAABJRU5ErkJggg==");
 
   @BeforeAll
   static void startFxToolkit() throws Exception {
@@ -197,6 +203,77 @@ class EmuSimulatorAppRealDataOverlayTest {
     assertTrue(
         options.toArgs().contains("--doc=12345678"),
         "Scenario runner arguments should include filler-free document number");
+  }
+
+  @Test
+  void copyingMrzCopiesFaceOverridesWhenPreviewAvailable() throws Exception {
+    assumeTrue(fxAvailable, "JavaFX toolkit unavailable in headless environment");
+
+    EmuSimulatorApp app = new EmuSimulatorApp();
+
+    String mrz = "P<UTOEXAMPLE<<PERSON<<<<<<<<<<<<<<\n"
+        + "12345678<UTO9001012F3001018<<<<<<<<<<<<<<";
+
+    RealPassportSnapshot snapshot = new RealPassportSnapshot(
+        "12345678",
+        "900101",
+        "300101",
+        mrz,
+        "PERSON EXAMPLE",
+        "UTO",
+        "image/png",
+        ONE_PIXEL_PNG,
+        Map.of(1, new byte[] {0x01}, 2, new byte[] {0x02}),
+        null,
+        null,
+        null);
+
+    CountDownLatch loadLatch = new CountDownLatch(1);
+    AtomicReference<Throwable> loadError = new AtomicReference<>();
+    Platform.runLater(() -> {
+      try {
+        invoke(app, "handleRealPassportData", snapshot);
+        invoke(app, "copyRealReaderMrzToAdvanced");
+      } catch (Throwable t) {
+        loadError.set(t);
+      } finally {
+        loadLatch.countDown();
+      }
+    });
+    if (!loadLatch.await(5, TimeUnit.SECONDS)) {
+      fail("Timed out applying MRZ summary and copying overrides from real passport data");
+    }
+    if (loadError.get() != null) {
+      fail(loadError.get());
+    }
+
+    AdvancedOptionsPane pane = extractAdvancedOptionsPane(app);
+
+    AtomicReference<AdvancedOptionsSnapshot> snapshotRef = new AtomicReference<>();
+    CountDownLatch snapshotLatch = new CountDownLatch(1);
+    Platform.runLater(() -> {
+      snapshotRef.set(pane.snapshot());
+      snapshotLatch.countDown();
+    });
+    if (!snapshotLatch.await(5, TimeUnit.SECONDS)) {
+      fail("Timed out capturing advanced options snapshot after copying overrides");
+    }
+
+    AdvancedOptionsSnapshot options = snapshotRef.get();
+    assertNotNull(options, "Advanced options snapshot should be captured");
+
+    String facePath = options.getIssuerFacePath();
+    assertNotNull(facePath, "Face override path should be populated");
+    assertTrue(!facePath.isBlank(), "Face override path should not be blank");
+
+    Path previewPath = Paths.get(facePath);
+    assertTrue(Files.exists(previewPath), "Face preview file should exist on disk");
+    try {
+      assertEquals(Integer.valueOf(1), options.getIssuerFaceWidth(), "Face width should match preview image");
+      assertEquals(Integer.valueOf(1), options.getIssuerFaceHeight(), "Face height should match preview image");
+    } finally {
+      Files.deleteIfExists(previewPath);
+    }
   }
 
   private static Label extractLabel(EmuSimulatorApp app, String fieldName) throws Exception {
