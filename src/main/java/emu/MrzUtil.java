@@ -13,6 +13,7 @@ public final class MrzUtil {
   private static final int TD1_DOC_NUMBER_START = 5;
   private static final int TD1_DOC_NUMBER_LENGTH = 9;
   private static final int TD3_DOC_NUMBER_LENGTH = 9;
+  private static final char FILLER_CHARACTER = '<';
 
   private MrzUtil() {
   }
@@ -88,6 +89,25 @@ public final class MrzUtil {
       return firstLine.substring(0, TD3_DOC_NUMBER_LENGTH);
     }
     return null;
+  }
+
+  /**
+   * Removes trailing filler characters ({@code <}) that are commonly appended to MRZ fields when the
+   * underlying value is shorter than the allotted space.
+   */
+  public static String stripTrailingFillers(String value) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    int end = trimmed.length();
+    while (end > 0 && trimmed.charAt(end - 1) == FILLER_CHARACTER) {
+      end--;
+    }
+    if (end == trimmed.length()) {
+      return trimmed;
+    }
+    return trimmed.substring(0, end);
   }
 
   private static List<String> splitLines(String mrzText) {

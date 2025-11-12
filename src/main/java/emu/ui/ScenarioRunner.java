@@ -308,14 +308,6 @@ final class ScenarioRunner {
       ScenarioStep step,
       AdvancedOptionsSnapshot options,
       Path reportPath,
-      IssuerSimulator.Result issuerResult) {
-    return buildSimConfig(step, options, reportPath, issuerResult, null);
-  }
-
-  private SimConfig buildSimConfig(
-      ScenarioStep step,
-      AdvancedOptionsSnapshot options,
-      Path reportPath,
       IssuerSimulator.Result issuerResult,
       RealPassportProfile realProfile) {
     SimConfig.Builder builder = new SimConfig.Builder()
