@@ -102,6 +102,35 @@ final class AdvancedOptionsPane extends TitledPane {
     setContent(scrollPane);
   }
 
+  void applyMrzSummary(SessionReportViewData.MrzSummary summary) {
+    if (summary == null) {
+      clearMrzInputs();
+      return;
+    }
+
+    setComboBoxValue(documentTypeBox, summary.getDocumentType());
+    setTextField(docNumberField, summary.getDocumentNumber());
+    setTextField(issuingStateField, summary.getIssuingState());
+    setTextField(nationalityField, summary.getNationality());
+    setTextField(primaryIdentifierField, summary.getPrimaryIdentifier());
+    setTextField(secondaryIdentifierField, summary.getSecondaryIdentifier());
+    setTextField(dobField, summary.getDateOfBirth());
+    setTextField(doeField, summary.getDateOfExpiry());
+    setComboBoxValue(genderBox, summary.getGender());
+  }
+
+  void clearMrzInputs() {
+    setComboBoxValue(documentTypeBox, null);
+    setTextField(docNumberField, null);
+    setTextField(issuingStateField, null);
+    setTextField(nationalityField, null);
+    setTextField(primaryIdentifierField, null);
+    setTextField(secondaryIdentifierField, null);
+    setTextField(dobField, null);
+    setTextField(doeField, null);
+    setComboBoxValue(genderBox, null);
+  }
+
   AdvancedOptionsSnapshot snapshot() {
     String taDateValue = null;
     if (taDatePicker.getValue() != null) {
@@ -352,6 +381,29 @@ final class AdvancedOptionsPane extends TitledPane {
 
   private static String trimmed(String value) {
     return value == null ? null : value.trim();
+  }
+
+  private void setTextField(TextField field, String value) {
+    field.setText(value == null ? "" : value);
+  }
+
+  private void setComboBoxValue(ComboBox<String> box, String value) {
+    if (value == null || value.isBlank()) {
+      box.getSelectionModel().clearSelection();
+      if (box.isEditable()) {
+        box.getEditor().setText("");
+      }
+      return;
+    }
+
+    if (box.getItems().contains(value)) {
+      box.getSelectionModel().select(value);
+    } else if (box.isEditable()) {
+      box.getSelectionModel().clearSelection();
+      box.getEditor().setText(value);
+    } else {
+      box.getSelectionModel().clearSelection();
+    }
   }
 
   private String comboValue(ComboBox<String> box) {

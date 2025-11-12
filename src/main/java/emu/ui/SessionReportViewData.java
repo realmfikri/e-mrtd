@@ -226,6 +226,8 @@ final class SessionReportViewData {
     private final String secondaryIdentifier;
     private final String issuingState;
     private final String nationality;
+    private final String documentType;
+    private final String gender;
 
     MrzSummary(String documentNumber,
                String dateOfBirth,
@@ -234,6 +236,26 @@ final class SessionReportViewData {
                String secondaryIdentifier,
                String issuingState,
                String nationality) {
+      this(documentNumber,
+          dateOfBirth,
+          dateOfExpiry,
+          primaryIdentifier,
+          secondaryIdentifier,
+          issuingState,
+          nationality,
+          null,
+          null);
+    }
+
+    MrzSummary(String documentNumber,
+               String dateOfBirth,
+               String dateOfExpiry,
+               String primaryIdentifier,
+               String secondaryIdentifier,
+               String issuingState,
+               String nationality,
+               String documentType,
+               String gender) {
       this.documentNumber = documentNumber;
       this.dateOfBirth = dateOfBirth;
       this.dateOfExpiry = dateOfExpiry;
@@ -241,6 +263,8 @@ final class SessionReportViewData {
       this.secondaryIdentifier = secondaryIdentifier;
       this.issuingState = issuingState;
       this.nationality = nationality;
+      this.documentType = documentType;
+      this.gender = gender;
     }
 
     String getDocumentNumber() {
@@ -269,6 +293,14 @@ final class SessionReportViewData {
 
     String getNationality() {
       return nationality;
+    }
+
+    String getDocumentType() {
+      return documentType;
+    }
+
+    String getGender() {
+      return gender;
     }
   }
 }
