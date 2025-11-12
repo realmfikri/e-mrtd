@@ -388,7 +388,6 @@ public final class EmuSimulatorApp extends Application {
     }
 
     documentNumber = documentNumber.replace(" ", "").toUpperCase(Locale.ROOT);
-    documentNumber = MrzUtil.ensureDocumentNumberLength(documentNumber);
     dateOfBirth = dateOfBirth.replace(" ", "");
     dateOfExpiry = dateOfExpiry.replace(" ", "");
 
