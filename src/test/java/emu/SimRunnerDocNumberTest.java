@@ -22,7 +22,7 @@ class SimRunnerDocNumberTest {
     assertNotNull(mrz, "DG1 summary should be present after personalization");
     assertEquals(
         "X5215910<",
-        MrzUtil.ensureDocumentNumberLength(mrz.documentNumber),
+        mrz.documentNumber,
         "DG1 MRZ must include filler padding");
   }
 }

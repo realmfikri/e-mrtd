@@ -26,8 +26,10 @@ final class IssuerSecretEncoder {
 
   static byte[] encodeMrzSeed(MRZInfo mrzInfo) {
     Objects.requireNonNull(mrzInfo, "mrzInfo");
+    String paddedDocumentNumber =
+        MrzUtil.ensureDocumentNumberLength(mrzInfo.getDocumentNumber(), mrzInfo.getDocumentCode());
     return encodeMrzSeed(
-        mrzInfo.getDocumentNumber(),
+        paddedDocumentNumber,
         mrzInfo.getDateOfBirth(),
         mrzInfo.getDateOfExpiry());
   }

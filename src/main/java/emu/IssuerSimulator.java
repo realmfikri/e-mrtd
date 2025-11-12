@@ -199,7 +199,9 @@ public final class IssuerSimulator {
         service.open();
         service.sendSelectApplet(false);
         MRZInfo mrz = job.getMrzInfo();
-        BACKey bacKey = new BACKey(mrz.getDocumentNumber(), mrz.getDateOfBirth(), mrz.getDateOfExpiry());
+        String docNumber =
+            MrzUtil.ensureDocumentNumberLength(mrz.getDocumentNumber(), mrz.getDocumentCode());
+        BACKey bacKey = new BACKey(docNumber, mrz.getDateOfBirth(), mrz.getDateOfExpiry());
         service.doBAC(bacKey);
         return PassiveAuthentication.verify(service, trustAnchors, null);
       } finally {
@@ -275,7 +277,9 @@ public final class IssuerSimulator {
     Map<String, Object> manifest = new LinkedHashMap<>();
     MRZInfo mrz = job.getMrzInfo();
     Map<String, Object> mrzSection = new LinkedHashMap<>();
-    mrzSection.put("documentNumber", mrz.getDocumentNumber());
+    String documentNumber =
+        MrzUtil.ensureDocumentNumberLength(mrz.getDocumentNumber(), mrz.getDocumentCode());
+    mrzSection.put("documentNumber", documentNumber);
     mrzSection.put("issuingState", mrz.getIssuingState());
     mrzSection.put("nationality", mrz.getNationality());
     mrzSection.put("dateOfBirth", mrz.getDateOfBirth());

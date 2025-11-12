@@ -17,7 +17,7 @@ class IssuerJobBuilderTest {
     MRZInfo mrzInfo = job.getMrzInfo();
     assertEquals(
         "X5215910<",
-        MrzUtil.ensureDocumentNumberLength(mrzInfo.getDocumentNumber(), mrzInfo.getDocumentCode()),
+        MrzUtil.deriveDocumentNumber(mrzInfo),
         "Issuer MRZ should be padded to nine characters");
   }
 }
