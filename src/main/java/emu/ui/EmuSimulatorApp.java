@@ -1,6 +1,7 @@
 package emu.ui;
 
 import emu.IssuerSimulator;
+import emu.MrzUtil;
 import emu.PersonalizationJob;
 import emu.RealPassportProfile;
 import emu.SessionReport;
@@ -1735,6 +1736,10 @@ public final class EmuSimulatorApp extends Application {
     String gender = null;
 
     String mrz = data.mrz();
+    String derivedDocumentNumber = MrzUtil.deriveDocumentNumber(mrz);
+    if (hasText(derivedDocumentNumber)) {
+      documentNumber = derivedDocumentNumber;
+    }
     if (mrz != null && !mrz.isBlank()) {
       String[] lines = mrz.split("\r?\n");
       if (lines.length > 0) {

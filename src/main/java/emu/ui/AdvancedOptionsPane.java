@@ -76,6 +76,8 @@ final class AdvancedOptionsPane extends TitledPane {
   private final TextField faceWidthField = new TextField();
   private final TextField faceHeightField = new TextField();
 
+  private int expectedMrzDocumentNumberLength;
+
   AdvancedOptionsPane() {
     setText("Advanced toggles");
     setCollapsible(true);
@@ -104,12 +106,16 @@ final class AdvancedOptionsPane extends TitledPane {
 
   void applyMrzSummary(SessionReportViewData.MrzSummary summary) {
     if (summary == null) {
+      expectedMrzDocumentNumberLength = 0;
       clearMrzInputs();
       return;
     }
 
+    String documentNumber = summary.getDocumentNumber();
+    expectedMrzDocumentNumberLength = documentNumber != null ? documentNumber.length() : 0;
+
     setComboBoxValue(documentTypeBox, summary.getDocumentType());
-    setTextField(docNumberField, summary.getDocumentNumber());
+    setTextField(docNumberField, documentNumber);
     setTextField(issuingStateField, summary.getIssuingState());
     setTextField(nationalityField, summary.getNationality());
     setTextField(primaryIdentifierField, summary.getPrimaryIdentifier());
@@ -120,6 +126,7 @@ final class AdvancedOptionsPane extends TitledPane {
   }
 
   void clearMrzInputs() {
+    expectedMrzDocumentNumberLength = 0;
     setComboBoxValue(documentTypeBox, null);
     setTextField(docNumberField, null);
     setTextField(issuingStateField, null);
@@ -149,9 +156,12 @@ final class AdvancedOptionsPane extends TitledPane {
       }
     }
 
+    String docNumber = trimmed(docNumberField.getText());
+    docNumber = normalizeDocumentNumber(docNumber);
+
     return new AdvancedOptionsSnapshot(
         comboValue(documentTypeBox),
-        trimmed(docNumberField.getText()),
+        docNumber,
         trimmed(issuingStateField.getText()),
         trimmed(nationalityField.getText()),
         trimmed(primaryIdentifierField.getText()),
@@ -381,6 +391,24 @@ final class AdvancedOptionsPane extends TitledPane {
 
   private static String trimmed(String value) {
     return value == null ? null : value.trim();
+  }
+
+  private String normalizeDocumentNumber(String value) {
+    if (!hasText(value) || expectedMrzDocumentNumberLength <= 0) {
+      return value;
+    }
+    if (value.length() >= expectedMrzDocumentNumberLength) {
+      return value;
+    }
+    StringBuilder builder = new StringBuilder(value);
+    while (builder.length() < expectedMrzDocumentNumberLength) {
+      builder.append('<');
+    }
+    return builder.toString();
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
   }
 
   private void setTextField(TextField field, String value) {
