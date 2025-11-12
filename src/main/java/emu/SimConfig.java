@@ -35,6 +35,7 @@ public final class SimConfig {
   public final Path facePreviewDirectory;
   public final IssuerSimulator.Result issuerResult;
   public final CardSimulator cardSimulator;
+  public final RealPassportProfile realPassportProfile;
 
   private SimConfig(Builder builder) {
     this.seed = builder.seed;
@@ -62,6 +63,7 @@ public final class SimConfig {
     this.facePreviewDirectory = builder.facePreviewDirectory;
     this.issuerResult = builder.issuerResult;
     this.cardSimulator = builder.cardSimulator;
+    this.realPassportProfile = builder.realPassportProfile;
   }
 
   public Builder toBuilder() {
@@ -91,6 +93,7 @@ public final class SimConfig {
     builder.facePreviewDirectory = facePreviewDirectory;
     builder.issuerResult = issuerResult;
     builder.cardSimulator = cardSimulator;
+    builder.realPassportProfile = realPassportProfile;
     return builder;
   }
 
@@ -120,6 +123,7 @@ public final class SimConfig {
     Path facePreviewDirectory;
     IssuerSimulator.Result issuerResult;
     CardSimulator cardSimulator;
+    RealPassportProfile realPassportProfile;
 
     public Builder seed(boolean value) {
       this.seed = value;
@@ -252,6 +256,11 @@ public final class SimConfig {
 
     public Builder cardSimulator(CardSimulator value) {
       this.cardSimulator = value;
+      return this;
+    }
+
+    public Builder realPassportProfile(RealPassportProfile value) {
+      this.realPassportProfile = value;
       return this;
     }
 

@@ -146,9 +146,21 @@ public final class SimRunner {
         ? (!issuerResult.isLeavePersonalized()
             && containsLifecycleTarget(issuerLifecycleTargets, "LOCKED"))
         : true;
+    RealPassportProfile realProfile = config.realPassportProfile;
     String doc = hasText(config.docNumber) ? config.docNumber : DEFAULT_DOC;
     String dob = hasText(config.dateOfBirth) ? config.dateOfBirth : DEFAULT_DOB;
     String doe = hasText(config.dateOfExpiry) ? config.dateOfExpiry : DEFAULT_DOE;
+    if (realProfile != null) {
+      if (hasText(realProfile.getDocumentNumber())) {
+        doc = realProfile.getDocumentNumber();
+      }
+      if (hasText(realProfile.getDateOfBirth())) {
+        dob = realProfile.getDateOfBirth();
+      }
+      if (hasText(realProfile.getDateOfExpiry())) {
+        doe = realProfile.getDateOfExpiry();
+      }
+    }
     if (issuerJob != null && issuerJob.getMrzInfo() != null) {
       MRZInfo mrzInfo = issuerJob.getMrzInfo();
       doc = mrzInfo.getDocumentNumber();
@@ -195,8 +207,13 @@ public final class SimRunner {
 
     // --- tulis data minimal (COM + DG1 + DG2) ke chip ---
     SODArtifacts personalizationArtifacts;
+    boolean hydrateFromProfile = createdSimulator && realProfile != null;
     boolean createdFromIssuerArtifacts = issuerResult != null && createdSimulator;
-    if (createdFromIssuerArtifacts) {
+    if (hydrateFromProfile) {
+      personalizationArtifacts = null;
+      System.out.println("Hydrating simulator from captured passport LDS profile.");
+      hydrateFromRealPassport(ch, realProfile);
+    } else if (createdFromIssuerArtifacts) {
       personalizationArtifacts = issuerResult.getArtifacts();
       hydrateFromArtifacts(ch, personalizationArtifacts);
     } else if (createdSimulator) {
@@ -205,6 +222,17 @@ public final class SimRunner {
       personalizationArtifacts = issuerResult.getArtifacts();
     } else {
       personalizationArtifacts = null;
+    }
+
+    boolean chipPrivateKeyAvailable = !createdSimulator;
+    boolean aaPrivateKeyAvailable = !createdSimulator;
+    if (createdSimulator) {
+      chipPrivateKeyAvailable = personalizationArtifacts != null
+          && personalizationArtifacts.getChipAuthKeyPair() != null
+          && personalizationArtifacts.getChipAuthKeyPair().getPrivate() != null;
+      aaPrivateKeyAvailable = personalizationArtifacts != null
+          && personalizationArtifacts.getAaKeyPair() != null
+          && personalizationArtifacts.getAaKeyPair().getPrivate() != null;
     }
 
     // --- langkah penting: tanam kunci BAC di applet ---
@@ -277,6 +305,9 @@ public final class SimRunner {
     if ((rawCardAccess == null || rawCardAccess.length == 0) && personalizationArtifacts != null) {
       rawCardAccess = personalizationArtifacts.getCardAccessBytes();
     }
+    if ((rawCardAccess == null || rawCardAccess.length == 0) && realProfile != null) {
+      rawCardAccess = realProfile.getCardAccessFile();
+    }
     if (rawCardAccess != null) {
       System.out.printf("EF.CardAccess length=%d bytes%n", rawCardAccess.length);
     }
@@ -328,7 +359,10 @@ public final class SimRunner {
     if (dg14 != null) {
       report.dataGroups.addPresent(14);
     }
-    ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(svc, dg14);
+    ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(
+        svc,
+        dg14,
+        chipPrivateKeyAvailable);
     report.session.caEstablished = chipAuthOutcome.established;
     System.out.printf("caEstablished=%s%n", chipAuthOutcome.established);
 
@@ -336,7 +370,12 @@ public final class SimRunner {
     if (dg15 != null) {
       report.dataGroups.addPresent(15);
     }
-    ActiveAuthOutcome activeAuthOutcome = performActiveAuthentication(loggingService, svc, dg15, requireAA);
+    ActiveAuthOutcome activeAuthOutcome = performActiveAuthentication(
+        loggingService,
+        svc,
+        dg15,
+        requireAA,
+        aaPrivateKeyAvailable);
     System.out.printf("aaAvailable=%s, aaVerified=%s%n", activeAuthOutcome.available, activeAuthOutcome.verified);
     if (requireAA && !activeAuthOutcome.verified) {
       throw new RuntimeException("Active Authentication failed but was required");
@@ -426,6 +465,35 @@ public final class SimRunner {
         }
       }
     }
+    if (!dg1Read && realProfile != null) {
+      byte[] dg1Bytes = realProfile.getDataGroupBytes(1);
+      if (dg1Bytes != null && dg1Bytes.length > 0) {
+        try (ByteArrayInputStream fallback = new ByteArrayInputStream(dg1Bytes)) {
+          DG1File dg1 = new DG1File(fallback);
+          MRZInfo info = dg1.getMRZInfo();
+          if (info != null) {
+            System.out.println("==== DG1 (profile fallback) ====");
+            System.out.println("Doc#: " + info.getDocumentNumber());
+            System.out.println("DOB  : " + info.getDateOfBirth());
+            System.out.println("DOE  : " + info.getDateOfExpiry());
+            System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
+            System.out.println("Gender: " + info.getGender());
+            report.dataGroups.addPresent(1);
+            report.dataGroups.setDg1Mrz(new SessionReport.MrzSummary(
+                info.getDocumentNumber(),
+                info.getDateOfBirth(),
+                info.getDateOfExpiry(),
+                info.getPrimaryIdentifier(),
+                info.getSecondaryIdentifier(),
+                info.getIssuingState(),
+                info.getNationality()));
+            dg1Read = true;
+          }
+        } catch (IOException fallbackError) {
+          System.out.println("DG1 profile fallback failed: " + fallbackError.getMessage());
+        }
+      }
+    }
     if (!dg1Read) {
       throw new RuntimeException("Failed to read DG1 from card or issuer artifacts");
     }
@@ -461,7 +529,13 @@ public final class SimRunner {
       report.setPassiveAuthentication(null);
     }
 
-    SessionReport.Dg2Metadata dg2Metadata = summarizeDG2(svc, largeDG2, config, sink, personalizationArtifacts);
+    SessionReport.Dg2Metadata dg2Metadata = summarizeDG2(
+        svc,
+        largeDG2,
+        config,
+        sink,
+        personalizationArtifacts,
+        realProfile);
     if (dg2Metadata != null) {
       report.dataGroups.addPresent(2);
       report.dataGroups.setDg2Metadata(dg2Metadata);
@@ -634,6 +708,47 @@ public final class SimRunner {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
     writeDefaultTrustAnchors(artifacts);
+  }
+
+  private static void hydrateFromRealPassport(CardChannel ch, RealPassportProfile profile) throws Exception {
+    byte[] comBytes = profile.getComFile();
+    if (comBytes != null && comBytes.length > 0) {
+      createEF(ch, EF_COM, comBytes.length, "CREATE EF.COM");
+      selectEF(ch, EF_COM, "SELECT EF.COM before WRITE");
+      writeBinary(ch, comBytes, "WRITE EF.COM");
+    } else {
+      System.out.println("Profile missing COM file; simulator will rely on existing data groups.");
+    }
+
+    List<Map.Entry<Integer, byte[]>> dataGroups = new ArrayList<>(profile.getDataGroupBytes().entrySet());
+    dataGroups.sort(Comparator.comparingInt(Map.Entry::getKey));
+    for (Map.Entry<Integer, byte[]> entry : dataGroups) {
+      Integer dg = entry.getKey();
+      byte[] bytes = entry.getValue();
+      if (dg == null || bytes == null || bytes.length == 0) {
+        continue;
+      }
+      short fid = (short) (0x0100 | (dg.intValue() & 0xFF));
+      createEF(ch, fid, bytes.length, String.format("CREATE EF.DG%d", dg));
+      selectEF(ch, fid, String.format("SELECT EF.DG%d before WRITE", dg));
+      writeBinary(ch, bytes, String.format("WRITE EF.DG%d", dg));
+    }
+
+    byte[] cardAccessBytes = profile.getCardAccessFile();
+    if (cardAccessBytes != null && cardAccessBytes.length > 0) {
+      createEF(ch, EF_CARD_ACCESS, cardAccessBytes.length, "CREATE EF.CardAccess");
+      selectEF(ch, EF_CARD_ACCESS, "SELECT EF.CardAccess before WRITE");
+      writeBinary(ch, cardAccessBytes, "WRITE EF.CardAccess");
+    }
+
+    byte[] sodBytes = profile.getSodFile();
+    if (sodBytes != null && sodBytes.length > 0) {
+      createEF(ch, EF_SOD, sodBytes.length, "CREATE EF.SOD");
+      selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
+      writeBinary(ch, sodBytes, "WRITE EF.SOD");
+    }
+
+    System.out.println("Skipped seeding Chip/Active Authentication private keys (not available in profile).");
   }
 
   private static void writeDefaultTrustAnchors(SODArtifacts artifacts)
@@ -1065,7 +1180,8 @@ public final class SimRunner {
 
   private static ChipAuthOutcome performChipAuthenticationIfSupported(
       PassportService svc,
-      DG14File dg14) {
+      DG14File dg14,
+      boolean chipPrivateKeyAvailable) {
     ChipAuthOutcome outcome = new ChipAuthOutcome();
     if (dg14 == null) {
       securityPrintln("Chip Authentication info unavailable (DG14 missing).");
@@ -1126,6 +1242,10 @@ public final class SimRunner {
     }
 
     outcome.publicKeyInfo = publicKeyInfo;
+    if (!chipPrivateKeyAvailable) {
+      securityPrintln("Chip Authentication skipped: simulator has no private key material.");
+      return outcome;
+    }
     try {
       String caOid = outcome.selectedInfo.getObjectIdentifier();
       String agreementAlg = ChipAuthenticationInfo.toKeyAgreementAlgorithm(caOid);
@@ -1157,7 +1277,8 @@ public final class SimRunner {
       CardService rawService,
       PassportService svc,
       DG15File dg15,
-      boolean requireAA) {
+      boolean requireAA,
+      boolean aaPrivateKeyAvailable) {
     ActiveAuthOutcome outcome = new ActiveAuthOutcome();
     if (dg15 == null) {
       securityPrintln("Active Authentication skipped: DG15 not present.");
@@ -1167,6 +1288,15 @@ public final class SimRunner {
     outcome.publicKey = dg15.getPublicKey();
     if (outcome.publicKey == null) {
       securityPrintln("Active Authentication skipped: DG15 does not contain a public key.");
+      return outcome;
+    }
+
+    if (!aaPrivateKeyAvailable) {
+      securityPrintln("Active Authentication skipped: simulator has no private key material.");
+      if (requireAA) {
+        throw new RuntimeException(
+            "Active Authentication required (--require-aa) but simulator lacks private key material.");
+      }
       return outcome;
     }
 
@@ -2108,7 +2238,8 @@ public final class SimRunner {
       boolean largeScenario,
       SimConfig config,
       SimEvents sink,
-      SODArtifacts personalizationArtifacts) {
+      SODArtifacts personalizationArtifacts,
+      RealPassportProfile realProfile) {
     String issuerPreviewPath = null;
     if (config != null && config.issuerResult != null) {
       issuerPreviewPath = config.issuerResult.getFacePreviewPath()
@@ -2127,6 +2258,12 @@ public final class SimRunner {
       dg2Bytes = personalizationArtifacts.getDataGroupBytes(2);
       if (dg2Bytes != null && dg2Bytes.length > 0) {
         System.out.println("Using issuer artifacts for DG2 metadata.");
+      }
+    }
+    if ((dg2Bytes == null || dg2Bytes.length == 0) && realProfile != null) {
+      dg2Bytes = realProfile.getDataGroupBytes(2);
+      if (dg2Bytes != null && dg2Bytes.length > 0) {
+        System.out.println("Using captured profile for DG2 metadata.");
       }
     }
     if (dg2Bytes == null || dg2Bytes.length == 0) {

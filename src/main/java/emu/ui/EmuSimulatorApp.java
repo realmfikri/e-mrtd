@@ -2,6 +2,7 @@ package emu.ui;
 
 import emu.IssuerSimulator;
 import emu.PersonalizationJob;
+import emu.RealPassportProfile;
 import emu.SessionReport;
 import emu.SimLogCategory;
 import emu.SimPhase;
@@ -61,6 +62,7 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 public final class EmuSimulatorApp extends Application {
@@ -92,6 +94,7 @@ public final class EmuSimulatorApp extends Application {
   private final TextField realReaderDateOfExpiryField = new TextField();
   private final ProgressIndicator realReaderProgress = new ProgressIndicator();
   private final Button copyMrzToAdvancedButton = new Button("Copy MRZ to advanced toggles");
+  private final Button copyLdsToSimulatorButton = new Button("Copy full LDS to simulator");
   private final Label verdictValue = valueLabel();
   private final Label smModeValue = valueLabel();
   private final Label paceValue = valueLabel();
@@ -169,6 +172,8 @@ public final class EmuSimulatorApp extends Application {
   private Task<ScenarioResult> currentTask;
   private Task<RealPassportSnapshot> currentReaderTask;
   private RealPassportSnapshot lastRealPassportSnapshot;
+  private RealPassportProfile lastRealPassportProfile;
+  private RealPassportProfile pendingSimulatorProfile;
   private SessionReportViewData.MrzSummary lastRealReaderMrzSummary;
   private List<String> lastCommands = List.of();
   private SessionReport lastReport;
@@ -328,8 +333,10 @@ public final class EmuSimulatorApp extends Application {
 
     copyMrzToAdvancedButton.setDisable(true);
     copyMrzToAdvancedButton.setOnAction(e -> copyRealReaderMrzToAdvanced());
+    copyLdsToSimulatorButton.setDisable(true);
+    copyLdsToSimulatorButton.setOnAction(e -> copyRealPassportProfileToSimulator());
 
-    HBox controls = new HBox(12, readButton, realReaderProgress, copyMrzToAdvancedButton);
+    HBox controls = new HBox(12, readButton, realReaderProgress, copyMrzToAdvancedButton, copyLdsToSimulatorButton);
     controls.setAlignment(Pos.CENTER_LEFT);
 
     container.getChildren().addAll(header, instructions, form, controls);
@@ -451,13 +458,33 @@ public final class EmuSimulatorApp extends Application {
     addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Copied MRZ data to advanced toggles");
   }
 
+  private void copyRealPassportProfileToSimulator() {
+    if (lastRealPassportProfile == null) {
+      statusLabel.setText("No LDS profile available to copy");
+      copyLdsToSimulatorButton.setDisable(true);
+      return;
+    }
+
+    pendingSimulatorProfile = lastRealPassportProfile;
+    statusLabel.setText("Captured LDS profile queued for next simulator run");
+    addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Queued captured LDS profile for simulator hydration");
+  }
+
   private void clearRealReaderMrzSummary() {
     lastRealReaderMrzSummary = null;
     copyMrzToAdvancedButton.setDisable(true);
+    clearRealPassportProfile();
+  }
+
+  private void clearRealPassportProfile() {
+    lastRealPassportProfile = null;
+    copyLdsToSimulatorButton.setDisable(true);
   }
 
   private void handleRealPassportData(RealPassportSnapshot data) {
     lastRealPassportSnapshot = data;
+    lastRealPassportProfile = buildRealPassportProfile(data);
+    copyLdsToSimulatorButton.setDisable(lastRealPassportProfile == null);
     SessionReportViewData.MrzSummary mrzSummary = buildMrzSummary(data);
 
     if (mrzSummary != null) {
@@ -790,10 +817,19 @@ public final class EmuSimulatorApp extends Application {
     runAllButton.setDisable(true);
     statusLabel.setText("Running " + preset.getName() + "...");
 
+    RealPassportProfile queuedProfile = pendingSimulatorProfile;
+    pendingSimulatorProfile = null;
+    if (queuedProfile != null) {
+      addLogEntry(
+          SimLogCategory.GENERAL,
+          preset.getName(),
+          "Using captured LDS profile for simulator hydration");
+    }
+
     Path reportPath = buildReportPath(preset.getName());
 
     UiScenarioListener listener = new UiScenarioListener();
-    currentTask = runner.createTask(preset, options, reportPath, listener, lastIssuerResult);
+    currentTask = runner.createTask(preset, options, reportPath, listener, lastIssuerResult, queuedProfile);
     currentTask.setOnSucceeded(e -> handleCompletion(currentTask.getValue()));
     currentTask.setOnFailed(e -> handleFailure(preset.getName(), currentTask.getException()));
     currentTask.setOnCancelled(e -> {
@@ -1595,6 +1631,21 @@ public final class EmuSimulatorApp extends Application {
     alert.setHeaderText(title);
     alert.setContentText(message);
     alert.showAndWait();
+  }
+
+  private RealPassportProfile buildRealPassportProfile(RealPassportSnapshot data) {
+    if (data == null) {
+      return null;
+    }
+    Map<Integer, byte[]> dataGroups = data.dataGroupBytes();
+    return new RealPassportProfile(
+        data.documentNumber(),
+        data.dateOfBirth(),
+        data.dateOfExpiry(),
+        dataGroups,
+        data.comFile(),
+        data.sodFile(),
+        data.cardAccessFile());
   }
 
   private SessionReportViewData.MrzSummary buildMrzSummary(RealPassportSnapshot data) {
