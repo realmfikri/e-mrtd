@@ -1,5 +1,7 @@
 package com.example;
 
+import emu.reader.PassportData;
+
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.List;
