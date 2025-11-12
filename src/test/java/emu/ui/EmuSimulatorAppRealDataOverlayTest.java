@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import emu.MrzUtil;
 import emu.RealPassportProfile;
+import emu.SimConfig;
 import emu.reader.RealPassportSnapshot;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -200,19 +202,38 @@ class EmuSimulatorAppRealDataOverlayTest {
 
     AdvancedOptionsSnapshot options = snapshotRef.get();
     assertNotNull(options, "Advanced options snapshot should be captured");
-    assertEquals("12345678", options.getDocumentNumber(), "MRZ document number should strip trailing filler");
-    assertEquals(8, options.getDocumentNumber().length(), "MRZ document number length should match identifier");
+    assertEquals("12345678<", options.getDocumentNumber(), "MRZ document number should preserve filler padding");
+    assertEquals("12345678", options.getDocumentNumberDisplay(), "Display value should strip MRZ filler characters");
+    assertEquals(9, options.getDocumentNumber().length(), "MRZ document number length should retain MRZ formatting");
     assertTrue(
-        options.toArgs().contains("--doc=12345678"),
-        "Scenario runner arguments should include filler-free document number");
+        options.toArgs().contains("--doc=12345678<"),
+        "Scenario runner arguments should include filler-preserved document number");
+
+    SimConfig.Builder builder = new SimConfig.Builder();
+    options.applyToBuilder(builder);
+    SimConfig config = builder.build();
+    assertEquals("12345678<", config.docNumber, "Sim config should receive filler-preserved document number");
+
+    ScenarioRunner runner = new ScenarioRunner();
+    java.lang.reflect.Method issuerArgsMethod = ScenarioRunner.class.getDeclaredMethod(
+        "buildIssuerAdvancedArgs",
+        AdvancedOptionsSnapshot.class);
+    issuerArgsMethod.setAccessible(true);
+    @SuppressWarnings("unchecked")
+    List<String> issuerArgs = (List<String>) issuerArgsMethod.invoke(runner, options);
+    assertTrue(
+        issuerArgs.contains("--doc-number=12345678<"),
+        "Issuer arguments should include filler-preserved document number");
   }
 
   @Test
-  void snapshotStripsFillersWhenUserShortensDocumentNumber() throws Exception {
+  void snapshotPreservesMrzPaddingWhenUserShortensDocumentNumber() throws Exception {
     assumeTrue(fxAvailable, "JavaFX toolkit unavailable in headless environment");
 
+    String mrzDocumentNumber = "L898902C<";
     SessionReportViewData.MrzSummary summary = new SessionReportViewData.MrzSummary(
-        "L898902C<",
+        MrzUtil.stripTrailingFillers(mrzDocumentNumber),
+        mrzDocumentNumber,
         "640812",
         "120415",
         "SPECIMEN",
@@ -225,6 +246,7 @@ class EmuSimulatorAppRealDataOverlayTest {
     AtomicReference<Throwable> errorRef = new AtomicReference<>();
 
     String userEntry = "L898902";
+    String expectedPadded = userEntry + "<<";
 
     Platform.runLater(() -> {
       try {
@@ -254,14 +276,18 @@ class EmuSimulatorAppRealDataOverlayTest {
     AdvancedOptionsSnapshot options = snapshotRef.get();
     assertNotNull(options, "Advanced options snapshot should be captured after user edit");
     assertEquals(
-        userEntry,
+        expectedPadded,
         options.getDocumentNumber(),
-        "Snapshot should retain user-entered document number without MRZ fillers");
+        "Snapshot should retain MRZ padding for BAC seeding");
+    assertEquals(
+        userEntry,
+        options.getDocumentNumberDisplay(),
+        "Snapshot should expose filler-free variant for UI display");
 
     List<String> scenarioArgs = options.toArgs();
     assertTrue(
-        scenarioArgs.contains("--doc=" + userEntry),
-        "Scenario arguments should contain filler-free document number");
+        scenarioArgs.contains("--doc=" + expectedPadded),
+        "Scenario arguments should contain filler-preserved document number");
 
     ScenarioRunner runner = new ScenarioRunner();
     java.lang.reflect.Method method = ScenarioRunner.class.getDeclaredMethod(
@@ -271,8 +297,8 @@ class EmuSimulatorAppRealDataOverlayTest {
     @SuppressWarnings("unchecked")
     List<String> issuerArgs = (List<String>) method.invoke(runner, options);
     assertTrue(
-        issuerArgs.contains("--doc-number=" + userEntry),
-        "Issuer arguments should contain filler-free document number");
+        issuerArgs.contains("--doc-number=" + expectedPadded),
+        "Issuer arguments should contain filler-preserved document number");
   }
 
   @Test

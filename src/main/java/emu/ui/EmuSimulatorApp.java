@@ -1757,7 +1757,8 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private SessionReportViewData.MrzSummary buildMrzSummary(RealPassportSnapshot data) {
-    String documentNumber = MrzUtil.stripTrailingFillers(data.documentNumber());
+    String documentNumberMrz = data.documentNumber();
+    String documentNumber = MrzUtil.stripTrailingFillers(documentNumberMrz);
     String dateOfBirth = data.dateOfBirth();
     String dateOfExpiry = data.dateOfExpiry();
     String issuingState = null;
@@ -1768,9 +1769,15 @@ public final class EmuSimulatorApp extends Application {
     String gender = null;
 
     String mrz = data.mrz();
-    String derivedDocumentNumber = MrzUtil.stripTrailingFillers(MrzUtil.deriveDocumentNumber(mrz));
+    String derivedDocumentNumberMrz = MrzUtil.deriveDocumentNumber(mrz);
+    String derivedDocumentNumber = MrzUtil.stripTrailingFillers(derivedDocumentNumberMrz);
     if (!hasText(documentNumber) && hasText(derivedDocumentNumber)) {
       documentNumber = derivedDocumentNumber;
+    }
+    if (hasText(derivedDocumentNumberMrz)
+        && (!hasText(documentNumberMrz)
+        || derivedDocumentNumberMrz.length() > documentNumberMrz.length())) {
+      documentNumberMrz = derivedDocumentNumberMrz;
     }
     if (mrz != null && !mrz.isBlank()) {
       String[] lines = mrz.split("\r?\n");
@@ -1800,6 +1807,7 @@ public final class EmuSimulatorApp extends Application {
 
     return new SessionReportViewData.MrzSummary(
         documentNumber,
+        documentNumberMrz,
         dateOfBirth,
         dateOfExpiry,
         primaryIdentifier,

@@ -112,8 +112,13 @@ final class AdvancedOptionsPane extends TitledPane {
       return;
     }
 
+    String documentNumberMrz = summary.getDocumentNumberMrz();
     String documentNumber = summary.getDocumentNumber();
-    expectedMrzDocumentNumberLength = documentNumber != null ? documentNumber.length() : 0;
+    if (!hasText(documentNumberMrz) && hasText(documentNumber)) {
+      documentNumberMrz = documentNumber;
+    }
+    expectedMrzDocumentNumberLength =
+        documentNumberMrz != null ? documentNumberMrz.length() : 0;
 
     setComboBoxValue(documentTypeBox, summary.getDocumentType());
     setTextField(docNumberField, documentNumber);
@@ -170,7 +175,9 @@ final class AdvancedOptionsPane extends TitledPane {
 
     String docNumber = trimmed(docNumberField.getText());
     docNumber = normalizeDocumentNumber(docNumber);
-    docNumber = MrzUtil.stripTrailingFillers(docNumber);
+    if (!hasText(docNumber)) {
+      docNumber = null;
+    }
 
     return new AdvancedOptionsSnapshot(
         comboValue(documentTypeBox),
