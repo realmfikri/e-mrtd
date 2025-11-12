@@ -91,6 +91,7 @@ public final class EmuSimulatorApp extends Application {
   private final TextField realReaderDateOfBirthField = new TextField();
   private final TextField realReaderDateOfExpiryField = new TextField();
   private final ProgressIndicator realReaderProgress = new ProgressIndicator();
+  private final Button copyMrzToAdvancedButton = new Button("Copy MRZ to advanced toggles");
   private final Label verdictValue = valueLabel();
   private final Label smModeValue = valueLabel();
   private final Label paceValue = valueLabel();
@@ -168,6 +169,7 @@ public final class EmuSimulatorApp extends Application {
   private Task<ScenarioResult> currentTask;
   private Task<RealPassportSnapshot> currentReaderTask;
   private RealPassportSnapshot lastRealPassportSnapshot;
+  private SessionReportViewData.MrzSummary lastRealReaderMrzSummary;
   private List<String> lastCommands = List.of();
   private SessionReport lastReport;
   private IssuerSimulator.Result lastIssuerResult;
@@ -324,7 +326,10 @@ public final class EmuSimulatorApp extends Application {
 
     readButton.disableProperty().bind(realReaderProgress.visibleProperty());
 
-    HBox controls = new HBox(12, readButton, realReaderProgress);
+    copyMrzToAdvancedButton.setDisable(true);
+    copyMrzToAdvancedButton.setOnAction(e -> copyRealReaderMrzToAdvanced());
+
+    HBox controls = new HBox(12, readButton, realReaderProgress, copyMrzToAdvancedButton);
     controls.setAlignment(Pos.CENTER_LEFT);
 
     container.getChildren().addAll(header, instructions, form, controls);
@@ -376,6 +381,7 @@ public final class EmuSimulatorApp extends Application {
 
     lastRealPassportSnapshot = null;
     currentReaderTask = task;
+    clearRealReaderMrzSummary();
     addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Starting passport read");
 
     realReaderProgress.progressProperty().unbind();
@@ -405,6 +411,7 @@ public final class EmuSimulatorApp extends Application {
         addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Passport read complete");
       } else {
         statusLabel.setText("Passport read complete (no data)");
+        clearRealReaderMrzSummary();
         showAlert(Alert.AlertType.INFORMATION, "No data", "The passport read finished but returned no MRZ data.");
       }
     });
@@ -423,6 +430,7 @@ public final class EmuSimulatorApp extends Application {
       statusLabel.setText("Passport read failed");
       addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Passport read failed: " + message);
       showAlert(Alert.AlertType.ERROR, "Passport read failed", message);
+      clearRealReaderMrzSummary();
     });
 
     Thread thread = new Thread(task, "real-passport-reader");
@@ -430,9 +438,34 @@ public final class EmuSimulatorApp extends Application {
     thread.start();
   }
 
+  private void copyRealReaderMrzToAdvanced() {
+    SessionReportViewData.MrzSummary summary = lastRealReaderMrzSummary;
+    if (summary == null) {
+      statusLabel.setText("No MRZ data available to copy");
+      copyMrzToAdvancedButton.setDisable(true);
+      return;
+    }
+
+    advancedOptionsPane.applyMrzSummary(summary);
+    statusLabel.setText("MRZ values copied to advanced toggles");
+    addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Copied MRZ data to advanced toggles");
+  }
+
+  private void clearRealReaderMrzSummary() {
+    lastRealReaderMrzSummary = null;
+    copyMrzToAdvancedButton.setDisable(true);
+  }
+
   private void handleRealPassportData(RealPassportSnapshot data) {
     lastRealPassportSnapshot = data;
     SessionReportViewData.MrzSummary mrzSummary = buildMrzSummary(data);
+
+    if (mrzSummary != null) {
+      lastRealReaderMrzSummary = mrzSummary;
+      copyMrzToAdvancedButton.setDisable(false);
+    } else {
+      clearRealReaderMrzSummary();
+    }
 
     List<Integer> presentDataGroups = new ArrayList<>();
     if (data.mrz() != null && !data.mrz().isBlank()) {
@@ -1572,12 +1605,15 @@ public final class EmuSimulatorApp extends Application {
     String primaryIdentifier = null;
     String secondaryIdentifier = null;
     String nationality = data.nationality();
+    String documentType = null;
+    String gender = null;
 
     String mrz = data.mrz();
     if (mrz != null && !mrz.isBlank()) {
       String[] lines = mrz.split("\r?\n");
       if (lines.length > 0) {
         String line1 = lines[0];
+        documentType = parseDocumentType(line1);
         if (line1.length() >= 5) {
           issuingState = sanitizeMrzComponent(line1.substring(2, 5));
           String names = line1.length() > 5 ? line1.substring(5) : "";
@@ -1589,6 +1625,9 @@ public final class EmuSimulatorApp extends Application {
             secondaryIdentifier = sanitizeMrzComponent(parts[1]);
           }
         }
+      }
+      if (lines.length > 1) {
+        gender = parseGender(lines[1]);
       }
     }
 
@@ -1603,7 +1642,9 @@ public final class EmuSimulatorApp extends Application {
         primaryIdentifier,
         secondaryIdentifier,
         issuingState,
-        nationality);
+        nationality,
+        documentType,
+        gender);
   }
 
   private static String sanitizeMrzComponent(String value) {
@@ -1612,6 +1653,31 @@ public final class EmuSimulatorApp extends Application {
     }
     String cleaned = value.replace('<', ' ').trim();
     return cleaned.replaceAll(" +", " ");
+  }
+
+  private static String parseDocumentType(String line) {
+    if (line == null || line.isBlank()) {
+      return null;
+    }
+    int length = Math.min(2, line.length());
+    String type = line.substring(0, length).trim();
+    return type.isEmpty() ? null : type;
+  }
+
+  private static String parseGender(String line) {
+    if (line == null || line.length() <= 20) {
+      return null;
+    }
+    char genderChar = Character.toUpperCase(line.charAt(20));
+    switch (genderChar) {
+      case 'M':
+      case 'F':
+      case 'X':
+      case 'U':
+        return String.valueOf(genderChar);
+      default:
+        return null;
+    }
   }
 
   private static String facePreviewExtension(String mime) {
@@ -1658,6 +1724,7 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private void clearCardDetailsTab() {
+    clearRealReaderMrzSummary();
     cardPortraitImage.setImage(null);
     terminalFacePreviewImage.setImage(null);
 
@@ -1770,6 +1837,9 @@ public final class EmuSimulatorApp extends Application {
 
   private void updateCardDetailsTab(SessionReportViewData readerData, IssuerSimulator.Result issuerResult) {
     boolean hasIssuer = issuerResult != null;
+    if (readerData == null || readerData.getMrzSummary() == null) {
+      clearRealReaderMrzSummary();
+    }
     String issuerPreviewPath = null;
     if (hasIssuer) {
       PersonalizationJob job = issuerResult.getJob();
