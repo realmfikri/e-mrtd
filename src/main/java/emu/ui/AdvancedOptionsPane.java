@@ -173,14 +173,15 @@ final class AdvancedOptionsPane extends TitledPane {
       }
     }
 
+    String documentType = comboValue(documentTypeBox);
     String docNumber = trimmed(docNumberField.getText());
-    docNumber = normalizeDocumentNumber(docNumber);
+    docNumber = normalizeDocumentNumber(docNumber, documentType);
     if (!hasText(docNumber)) {
       docNumber = null;
     }
 
     return new AdvancedOptionsSnapshot(
-        comboValue(documentTypeBox),
+        documentType,
         docNumber,
         trimmed(issuingStateField.getText()),
         trimmed(nationalityField.getText()),
@@ -413,18 +414,15 @@ final class AdvancedOptionsPane extends TitledPane {
     return value == null ? null : value.trim();
   }
 
-  private String normalizeDocumentNumber(String value) {
-    if (!hasText(value) || expectedMrzDocumentNumberLength <= 0) {
+  private String normalizeDocumentNumber(String value, String documentType) {
+    if (!hasText(value)) {
       return value;
     }
-    if (value.length() >= expectedMrzDocumentNumberLength) {
-      return value;
+    int targetLength = expectedMrzDocumentNumberLength;
+    if (targetLength <= 0) {
+      targetLength = MrzUtil.defaultDocumentNumberLength(documentType);
     }
-    StringBuilder builder = new StringBuilder(value);
-    while (builder.length() < expectedMrzDocumentNumberLength) {
-      builder.append('<');
-    }
-    return builder.toString();
+    return MrzUtil.ensureDocumentNumberLength(value, targetLength);
   }
 
   private static boolean hasText(String value) {

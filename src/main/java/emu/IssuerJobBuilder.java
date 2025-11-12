@@ -732,12 +732,13 @@ public final class IssuerJobBuilder {
     String gender = "M";
 
     MRZInfo toMrzInfo() {
+      String normalizedDocNumber = MrzUtil.ensureDocumentNumberLength(documentNumber, documentType);
       return new MRZInfo(
           documentType,
           issuingState,
           primaryIdentifier,
           secondaryIdentifier,
-          documentNumber,
+          normalizedDocNumber,
           nationality,
           dateOfBirth,
           parseGender(gender),
