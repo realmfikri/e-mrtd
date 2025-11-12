@@ -5,6 +5,8 @@ import emu.PersonalizationJob;
 import emu.SessionReport;
 import emu.SimLogCategory;
 import emu.SimPhase;
+import emu.reader.PassportData;
+import emu.reader.RealPassportReaderTask;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -15,14 +17,17 @@ import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
+import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
@@ -37,6 +42,7 @@ import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 import javafx.util.Callback;
+import org.jmrtd.BACKey;
 import org.jmrtd.lds.icao.MRZInfo;
 
 import java.io.File;
@@ -54,6 +60,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 public final class EmuSimulatorApp extends Application {
@@ -80,6 +87,10 @@ public final class EmuSimulatorApp extends Application {
   private TabPane resultTabs;
   private Tab issuerTab;
   private Tab cardDetailsTab;
+  private final TextField realReaderDocumentNumberField = new TextField();
+  private final TextField realReaderDateOfBirthField = new TextField();
+  private final TextField realReaderDateOfExpiryField = new TextField();
+  private final ProgressIndicator realReaderProgress = new ProgressIndicator();
   private final Label verdictValue = valueLabel();
   private final Label smModeValue = valueLabel();
   private final Label paceValue = valueLabel();
@@ -155,6 +166,7 @@ public final class EmuSimulatorApp extends Application {
   private static final String DG1_NOT_READ_PLACEHOLDER = "(DG1 not read)";
 
   private Task<ScenarioResult> currentTask;
+  private Task<PassportData> currentReaderTask;
   private List<String> lastCommands = List.of();
   private SessionReport lastReport;
   private IssuerSimulator.Result lastIssuerResult;
@@ -261,9 +273,225 @@ public final class EmuSimulatorApp extends Application {
     resultTabs.getTabs().add(cardDetailsTab);
     clearCardDetailsTab();
     resultTabs.getTabs().add(buildDataGroupsTab());
+    resultTabs.getTabs().add(buildRealReaderTab());
     resultTabs.getTabs().add(buildLogTab());
     resultTabs.getTabs().add(buildSecurityTab());
     return resultTabs;
+  }
+
+  private Tab buildRealReaderTab() {
+    VBox container = new VBox(12);
+    container.setPadding(new Insets(16));
+
+    Label header = new Label("Read a real passport");
+    header.getStyleClass().add("header-label");
+
+    Label instructions = new Label(
+        "Enter the document number, date of birth, and date of expiry from the MRZ, "
+            + "then place a passport on a connected NFC reader.");
+    instructions.setWrapText(true);
+
+    GridPane form = new GridPane();
+    form.setHgap(12);
+    form.setVgap(12);
+
+    Label docLabel = new Label("Document number");
+    realReaderDocumentNumberField.setPromptText("123456789");
+    realReaderDocumentNumberField.setPrefColumnCount(12);
+    form.add(docLabel, 0, 0);
+    form.add(realReaderDocumentNumberField, 1, 0);
+
+    Label dobLabel = new Label("Date of birth (YYMMDD)");
+    realReaderDateOfBirthField.setPromptText("YYMMDD");
+    realReaderDateOfBirthField.setPrefColumnCount(8);
+    form.add(dobLabel, 0, 1);
+    form.add(realReaderDateOfBirthField, 1, 1);
+
+    Label doeLabel = new Label("Date of expiry (YYMMDD)");
+    realReaderDateOfExpiryField.setPromptText("YYMMDD");
+    realReaderDateOfExpiryField.setPrefColumnCount(8);
+    form.add(doeLabel, 0, 2);
+    form.add(realReaderDateOfExpiryField, 1, 2);
+
+    Button readButton = new Button("Read passport");
+    readButton.setOnAction(e -> startRealPassportRead());
+
+    realReaderProgress.setMaxSize(32, 32);
+    realReaderProgress.setProgress(ProgressIndicator.INDETERMINATE_PROGRESS);
+    realReaderProgress.setVisible(false);
+    realReaderProgress.setManaged(false);
+
+    readButton.disableProperty().bind(realReaderProgress.visibleProperty());
+
+    HBox controls = new HBox(12, readButton, realReaderProgress);
+    controls.setAlignment(Pos.CENTER_LEFT);
+
+    container.getChildren().addAll(header, instructions, form, controls);
+
+    Tab tab = new Tab("Real Reader", container);
+    tab.setClosable(false);
+    return tab;
+  }
+
+  private void startRealPassportRead() {
+    if (currentReaderTask != null && currentReaderTask.isRunning()) {
+      statusLabel.setText("A passport read is already in progress; please wait");
+      return;
+    }
+    if (currentTask != null && currentTask.isRunning()) {
+      statusLabel.setText("Finish the running scenario before reading a real passport");
+      return;
+    }
+
+    String documentNumber = trimToNull(realReaderDocumentNumberField.getText());
+    String dateOfBirth = trimToNull(realReaderDateOfBirthField.getText());
+    String dateOfExpiry = trimToNull(realReaderDateOfExpiryField.getText());
+
+    if (documentNumber == null || dateOfBirth == null || dateOfExpiry == null) {
+      showAlert(Alert.AlertType.WARNING, "Missing MRZ values", "Please provide all MRZ fields before reading a passport.");
+      statusLabel.setText("Enter MRZ values before starting a read");
+      return;
+    }
+
+    documentNumber = documentNumber.replace(" ", "").toUpperCase(Locale.ROOT);
+    dateOfBirth = dateOfBirth.replace(" ", "");
+    dateOfExpiry = dateOfExpiry.replace(" ", "");
+
+    try {
+      new BACKey(documentNumber, dateOfBirth, dateOfExpiry);
+    } catch (IllegalArgumentException ex) {
+      showAlert(Alert.AlertType.ERROR, "Invalid MRZ values", ex.getMessage());
+      statusLabel.setText("Invalid MRZ values");
+      return;
+    }
+
+    RealPassportReaderTask task = new RealPassportReaderTask(
+        null,
+        0,
+        documentNumber,
+        dateOfBirth,
+        dateOfExpiry,
+        message -> Platform.runLater(() -> addLogEntry(SimLogCategory.GENERAL, "Real Reader", message)));
+
+    currentReaderTask = task;
+    addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Starting passport read");
+
+    realReaderProgress.progressProperty().unbind();
+    realReaderProgress.visibleProperty().unbind();
+    realReaderProgress.managedProperty().unbind();
+    statusLabel.textProperty().unbind();
+
+    realReaderProgress.setProgress(ProgressIndicator.INDETERMINATE_PROGRESS);
+    realReaderProgress.progressProperty().bind(task.progressProperty());
+    realReaderProgress.visibleProperty().bind(task.runningProperty());
+    realReaderProgress.managedProperty().bind(task.runningProperty());
+    statusLabel.textProperty().bind(task.messageProperty());
+
+    task.setOnSucceeded(evt -> {
+      realReaderProgress.progressProperty().unbind();
+      realReaderProgress.visibleProperty().unbind();
+      realReaderProgress.managedProperty().unbind();
+      statusLabel.textProperty().unbind();
+      realReaderProgress.setVisible(false);
+      realReaderProgress.setManaged(false);
+      currentReaderTask = null;
+
+      PassportData data = task.getValue();
+      if (data != null && data.isValid()) {
+        handleRealPassportData(data);
+        statusLabel.setText("Passport read complete");
+        addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Passport read complete");
+      } else {
+        statusLabel.setText("Passport read complete (no data)");
+        showAlert(Alert.AlertType.INFORMATION, "No data", "The passport read finished but returned no MRZ data.");
+      }
+    });
+
+    task.setOnFailed(evt -> {
+      realReaderProgress.progressProperty().unbind();
+      realReaderProgress.visibleProperty().unbind();
+      realReaderProgress.managedProperty().unbind();
+      statusLabel.textProperty().unbind();
+      realReaderProgress.setVisible(false);
+      realReaderProgress.setManaged(false);
+      currentReaderTask = null;
+
+      Throwable ex = task.getException();
+      String message = ex != null ? ex.getMessage() : "Unknown error";
+      statusLabel.setText("Passport read failed");
+      addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Passport read failed: " + message);
+      showAlert(Alert.AlertType.ERROR, "Passport read failed", message);
+    });
+
+    Thread thread = new Thread(task, "real-passport-reader");
+    thread.setDaemon(true);
+    thread.start();
+  }
+
+  private void handleRealPassportData(PassportData data) {
+    SessionReportViewData.MrzSummary mrzSummary = buildMrzSummary(data);
+
+    List<Integer> presentDataGroups = new ArrayList<>();
+    if (data.mrz() != null && !data.mrz().isBlank()) {
+      presentDataGroups.add(1);
+    }
+
+    String previewPathString = null;
+    byte[] imageBytes = data.safeImageBytes();
+    if (imageBytes != null && imageBytes.length > 0) {
+      try {
+        Path facesDir = Paths.get("target", "ui-session", "faces");
+        Files.createDirectories(facesDir);
+        String extension = facePreviewExtension(data.imageMime());
+        String fileName = "terminal-face-" + REPORT_TIMESTAMP.format(LocalDateTime.now()) + '.' + extension;
+        Path previewPath = facesDir.resolve(fileName);
+        Files.write(previewPath, imageBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+        previewPathString = previewPath.toAbsolutePath().toString();
+        presentDataGroups.add(2);
+      } catch (IOException ex) {
+        addLogEntry(SimLogCategory.GENERAL, "Real Reader", "Unable to write face preview: " + ex.getMessage());
+      }
+    }
+
+    SessionReportViewData viewData = new SessionReportViewData(
+        "Contactless",   // transport
+        "BAC",           // secureMessagingMode
+        false,            // paceAttempted
+        false,            // paceEstablished
+        false,            // caEstablished
+        false,            // activeAuthEnabled
+        false,            // activeAuthSupported
+        false,            // activeAuthVerified
+        null,             // activeAuthAlgorithm
+        null,             // passiveAuthVerdict
+        null,             // passiveAuthAlgorithm
+        List.of(),        // passiveAuthOkDataGroups
+        List.of(),        // passiveAuthBadDataGroups
+        List.of(),        // passiveAuthMissingDataGroups
+        List.of(),        // passiveAuthLockedDataGroups
+        null,             // passiveAuthSigner
+        null,             // passiveAuthChainStatus
+        mrzSummary,
+        presentDataGroups,
+        false,            // dg3Readable
+        false,            // dg4Readable
+        previewPathString,
+        null,
+        false,            // terminalAuthAttempted
+        false,            // terminalAuthSucceeded
+        false,            // terminalAuthDg3Unlocked
+        false,            // terminalAuthDg4Unlocked
+        null,             // terminalAuthRole
+        null,             // terminalAuthRights
+        List.of());       // terminalAuthWarnings
+
+    updateSummary(viewData);
+    updateDataGroups(viewData);
+    updateCardDetailsTab(viewData, lastIssuerResult);
+
+    if (resultTabs != null && cardDetailsTab != null) {
+      resultTabs.getSelectionModel().select(cardDetailsTab);
+    }
   }
 
   private Tab buildSummaryTab() {
@@ -1313,6 +1541,94 @@ public final class EmuSimulatorApp extends Application {
       task.run();
     } else {
       Platform.runLater(task);
+    }
+  }
+
+  private static String trimToNull(String value) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    return trimmed.isEmpty() ? null : trimmed;
+  }
+
+  private void showAlert(Alert.AlertType type, String title, String message) {
+    Alert alert = new Alert(type);
+    alert.initOwner(primaryStage);
+    alert.setTitle(title);
+    alert.setHeaderText(title);
+    alert.setContentText(message);
+    alert.showAndWait();
+  }
+
+  private SessionReportViewData.MrzSummary buildMrzSummary(PassportData data) {
+    String documentNumber = data.documentNumber();
+    String dateOfBirth = data.dateOfBirth();
+    String dateOfExpiry = data.dateOfExpiry();
+    String issuingState = null;
+    String primaryIdentifier = null;
+    String secondaryIdentifier = null;
+    String nationality = data.nationality();
+
+    String mrz = data.mrz();
+    if (mrz != null && !mrz.isBlank()) {
+      String[] lines = mrz.split("\r?\n");
+      if (lines.length > 0) {
+        String line1 = lines[0];
+        if (line1.length() >= 5) {
+          issuingState = sanitizeMrzComponent(line1.substring(2, 5));
+          String names = line1.length() > 5 ? line1.substring(5) : "";
+          String[] parts = names.split("<<");
+          if (parts.length > 0) {
+            primaryIdentifier = sanitizeMrzComponent(parts[0]);
+          }
+          if (parts.length > 1) {
+            secondaryIdentifier = sanitizeMrzComponent(parts[1]);
+          }
+        }
+      }
+    }
+
+    if (primaryIdentifier == null || primaryIdentifier.isBlank()) {
+      primaryIdentifier = sanitizeMrzComponent(data.fullName());
+    }
+
+    return new SessionReportViewData.MrzSummary(
+        documentNumber,
+        dateOfBirth,
+        dateOfExpiry,
+        primaryIdentifier,
+        secondaryIdentifier,
+        issuingState,
+        nationality);
+  }
+
+  private static String sanitizeMrzComponent(String value) {
+    if (value == null) {
+      return null;
+    }
+    String cleaned = value.replace('<', ' ').trim();
+    return cleaned.replaceAll(" +", " ");
+  }
+
+  private static String facePreviewExtension(String mime) {
+    if (mime == null || mime.isBlank()) {
+      return "bin";
+    }
+    String normalized = mime.toLowerCase(Locale.ROOT);
+    switch (normalized) {
+      case "image/jpeg":
+      case "image/jpg":
+        return "jpg";
+      case "image/png":
+        return "png";
+      case "image/jp2":
+        return "jp2";
+      case "image/x-wsq":
+      case "image/wsq":
+        return "wsq";
+      default:
+        return "bin";
     }
   }
 
