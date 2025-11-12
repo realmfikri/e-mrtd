@@ -29,6 +29,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.regex.Pattern;
 
 final class ScenarioRunner {
 
@@ -38,6 +39,8 @@ final class ScenarioRunner {
   private static final String DEFAULT_DOC = "123456789";
   private static final String DEFAULT_DOB = "750101";
   private static final String DEFAULT_DOE = "250101";
+
+  private static final Pattern SHELL_SAFE = Pattern.compile("[-A-Za-z0-9@%+=:,./_]+");
 
   private final Path projectDirectory = Paths.get("").toAbsolutePath();
   private final String javaExecutable;
@@ -104,7 +107,7 @@ final class ScenarioRunner {
           }
 
           List<String> command = buildCommand(step, advancedOptions, reportPath);
-          executedCommands.add(String.join(" ", command));
+          executedCommands.add(formatCommand(command));
 
           if (READ_MAIN_CLASS.equals(step.getMainClass())) {
             try {
@@ -260,7 +263,7 @@ final class ScenarioRunner {
 
   private int runProcessStep(ScenarioStep step, List<String> command, ScenarioExecutionListener listener)
       throws IOException, InterruptedException {
-    listener.onLog(SimLogCategory.GENERAL, step.getName(), "$ " + String.join(" ", command));
+    listener.onLog(SimLogCategory.GENERAL, step.getName(), "$ " + formatCommand(command));
     ProcessBuilder pb = new ProcessBuilder(command);
     pb.directory(projectDirectory.toFile());
     pb.redirectErrorStream(true);
@@ -273,6 +276,32 @@ final class ScenarioRunner {
       }
     }
     return process.waitFor();
+  }
+
+  static String formatCommand(List<String> command) {
+    return command.stream().map(ScenarioRunner::quoteArgument).collect(Collectors.joining(" "));
+  }
+
+  private static String quoteArgument(String arg) {
+    if (arg == null) {
+      return "";
+    }
+    if (arg.isEmpty()) {
+      return "''";
+    }
+    if (SHELL_SAFE.matcher(arg).matches()) {
+      return arg;
+    }
+    String escaped = arg.replace("'", "'\"'\"'");
+    return "'" + escaped + "'";
+  }
+
+  private SimConfig buildSimConfig(
+      ScenarioStep step,
+      AdvancedOptionsSnapshot options,
+      Path reportPath,
+      IssuerSimulator.Result issuerResult) {
+    return buildSimConfig(step, options, reportPath, issuerResult, null);
   }
 
   private SimConfig buildSimConfig(

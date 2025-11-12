@@ -1,5 +1,6 @@
 package emu.ui;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -7,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import emu.RealPassportProfile;
+import emu.reader.RealPassportSnapshot;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -134,6 +136,66 @@ class EmuSimulatorAppRealDataOverlayTest {
     assertFalse(visible.get(), "Overlay warning should hide after disarming");
   }
 
+  @Test
+  void mrzDocumentNumberCopiesWithPadding() throws Exception {
+    assumeTrue(fxAvailable, "JavaFX toolkit unavailable in headless environment");
+
+    EmuSimulatorApp app = new EmuSimulatorApp();
+
+    String mrz = "P<UTOEXAMPLE<<PERSON<<<<<<<<<<<<<<\n" +
+        "12345678<UTO9001012F3001018<<<<<<<<<<<<<<";
+
+    RealPassportSnapshot snapshot = new RealPassportSnapshot(
+        "12345678",
+        "900101",
+        "300101",
+        mrz,
+        "PERSON EXAMPLE",
+        "UTO",
+        null,
+        null,
+        Map.of(1, new byte[] {0x01}),
+        null,
+        null,
+        null);
+
+    CountDownLatch loadLatch = new CountDownLatch(1);
+    AtomicReference<Throwable> loadError = new AtomicReference<>();
+    Platform.runLater(() -> {
+      try {
+        invoke(app, "handleRealPassportData", snapshot);
+        invoke(app, "copyRealReaderMrzToAdvanced");
+      } catch (Throwable t) {
+        loadError.set(t);
+      } finally {
+        loadLatch.countDown();
+      }
+    });
+    if (!loadLatch.await(5, TimeUnit.SECONDS)) {
+      fail("Timed out applying MRZ summary from real passport data");
+    }
+    if (loadError.get() != null) {
+      fail(loadError.get());
+    }
+
+    AdvancedOptionsPane pane = extractAdvancedOptionsPane(app);
+
+    AtomicReference<AdvancedOptionsSnapshot> snapshotRef = new AtomicReference<>();
+    CountDownLatch snapshotLatch = new CountDownLatch(1);
+    Platform.runLater(() -> {
+      snapshotRef.set(pane.snapshot());
+      snapshotLatch.countDown();
+    });
+    if (!snapshotLatch.await(5, TimeUnit.SECONDS)) {
+      fail("Timed out capturing advanced options snapshot");
+    }
+
+    AdvancedOptionsSnapshot options = snapshotRef.get();
+    assertNotNull(options, "Advanced options snapshot should be captured");
+    assertEquals("12345678<", options.getDocumentNumber(), "MRZ document number should be padded");
+    assertEquals(9, options.getDocumentNumber().length(), "MRZ document number should be 9 characters");
+  }
+
   private static Label extractLabel(EmuSimulatorApp app, String fieldName) throws Exception {
     java.lang.reflect.Field field = EmuSimulatorApp.class.getDeclaredField(fieldName);
     field.setAccessible(true);
@@ -144,6 +206,12 @@ class EmuSimulatorAppRealDataOverlayTest {
     java.lang.reflect.Field field = target.getClass().getDeclaredField(fieldName);
     field.setAccessible(true);
     field.set(target, value);
+  }
+
+  private static AdvancedOptionsPane extractAdvancedOptionsPane(EmuSimulatorApp app) throws Exception {
+    java.lang.reflect.Field field = EmuSimulatorApp.class.getDeclaredField("advancedOptionsPane");
+    field.setAccessible(true);
+    return (AdvancedOptionsPane) field.get(app);
   }
 
   private static void invoke(Object target, String methodName, Object... args) throws Exception {
