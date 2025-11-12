@@ -2,6 +2,7 @@ package emu;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import org.jmrtd.lds.icao.MRZInfo;
 
@@ -108,6 +109,59 @@ public final class MrzUtil {
       return trimmed;
     }
     return trimmed.substring(0, end);
+  }
+
+  /**
+   * Returns the typical MRZ document number length for the supplied document type.
+   *
+   * <p>Most travel documents – passports (TD3), visas (TD2) and ID cards (TD1) – allocate nine
+   * characters to the document number field. The UI and simulators treat that as the default while
+   * still tolerating longer custom values supplied by callers.</p>
+   */
+  public static int defaultDocumentNumberLength(String documentType) {
+    if (documentType == null || documentType.isBlank()) {
+      return TD3_DOC_NUMBER_LENGTH;
+    }
+    String normalized = documentType.trim().toUpperCase(Locale.ROOT);
+    if (normalized.startsWith("P")
+        || normalized.startsWith("V")
+        || normalized.startsWith("I")
+        || normalized.startsWith("AC")
+        || normalized.startsWith("C")) {
+      return TD3_DOC_NUMBER_LENGTH;
+    }
+    return TD3_DOC_NUMBER_LENGTH;
+  }
+
+  /**
+   * Pads the supplied document number with MRZ filler characters ({@code <}) so that it matches the
+   * typical field length for the provided document type.
+   */
+  public static String ensureDocumentNumberLength(String value, String documentType) {
+    return ensureDocumentNumberLength(value, defaultDocumentNumberLength(documentType));
+  }
+
+  /**
+   * Pads the supplied document number with MRZ filler characters ({@code <}) until it reaches the
+   * requested length. Values that already meet or exceed the target length are returned unchanged.
+   */
+  public static String ensureDocumentNumberLength(String value, int targetLength) {
+    if (!hasText(value) || targetLength <= 0) {
+      return value;
+    }
+    StringBuilder builder = new StringBuilder(value.trim());
+    while (builder.length() < targetLength) {
+      builder.append(FILLER_CHARACTER);
+    }
+    return builder.toString();
+  }
+
+  /**
+   * Convenience overload that pads the supplied document number to the default MRZ length (nine
+   * characters).
+   */
+  public static String ensureDocumentNumberLength(String value) {
+    return ensureDocumentNumberLength(value, TD3_DOC_NUMBER_LENGTH);
   }
 
   private static List<String> splitLines(String mrzText) {

@@ -167,6 +167,7 @@ public final class SimRunner {
       dob = mrzInfo.getDateOfBirth();
       doe = mrzInfo.getDateOfExpiry();
     }
+    doc = MrzUtil.ensureDocumentNumberLength(doc);
     String can = config.can;
     String pin = config.pin;
     String puk = config.puk;
@@ -582,8 +583,9 @@ public final class SimRunner {
       String doc,
       String dob,
       String doe) throws Exception {
+    String normalizedDoc = MrzUtil.ensureDocumentNumberLength(doc);
     MRZInfo mrz = new MRZInfo("P<", "UTO", "BEAN", "HAPPY",
-        doc, "UTO", dob, Gender.MALE, doe, "");
+        normalizedDoc, "UTO", dob, Gender.MALE, doe, "");
     int faceWidth = largeDG2 ? 720 : 480;
     int faceHeight = largeDG2 ? 960 : 600;
     PersonalizationJob job = PersonalizationJob.builder()
