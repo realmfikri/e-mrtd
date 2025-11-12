@@ -3,6 +3,7 @@ package emu.ui;
 import emu.IssuerJobBuilder;
 import emu.IssuerSimulator;
 import emu.PersonalizationJob;
+import emu.RealPassportProfile;
 import emu.SessionReport;
 import emu.SimConfig;
 import emu.SimEvents;
@@ -50,7 +51,7 @@ final class ScenarioRunner {
       AdvancedOptionsSnapshot advancedOptions,
       Path reportPath,
       ScenarioExecutionListener listener) {
-    return createTask(preset, advancedOptions, reportPath, listener, null);
+    return createTask(preset, advancedOptions, reportPath, listener, null, null);
   }
 
   Task<ScenarioResult> createTask(
@@ -59,6 +60,16 @@ final class ScenarioRunner {
       Path reportPath,
       ScenarioExecutionListener listener,
       IssuerSimulator.Result initialIssuerResult) {
+    return createTask(preset, advancedOptions, reportPath, listener, initialIssuerResult, null);
+  }
+
+  Task<ScenarioResult> createTask(
+      ScenarioPreset preset,
+      AdvancedOptionsSnapshot advancedOptions,
+      Path reportPath,
+      ScenarioExecutionListener listener,
+      IssuerSimulator.Result initialIssuerResult,
+      RealPassportProfile realProfile) {
     Objects.requireNonNull(preset, "preset");
     Objects.requireNonNull(advancedOptions, "advancedOptions");
     Objects.requireNonNull(reportPath, "reportPath");
@@ -98,7 +109,7 @@ final class ScenarioRunner {
           if (READ_MAIN_CLASS.equals(step.getMainClass())) {
             try {
               IssuerSimulator.Result reusedIssuer = resolveIssuerReuse(step, finalIssuerResult, listener);
-              SimConfig config = buildSimConfig(step, advancedOptions, reportPath, reusedIssuer);
+              SimConfig config = buildSimConfig(step, advancedOptions, reportPath, reusedIssuer, realProfile);
               finalReport = runSimStep(simRunner, step, config, reusedIssuer, listener);
             } catch (Exception e) {
               listener.onLog(SimLogCategory.GENERAL, step.getName(), "Error: " + e.getMessage());
@@ -268,7 +279,8 @@ final class ScenarioRunner {
       ScenarioStep step,
       AdvancedOptionsSnapshot options,
       Path reportPath,
-      IssuerSimulator.Result issuerResult) {
+      IssuerSimulator.Result issuerResult,
+      RealPassportProfile realProfile) {
     SimConfig.Builder builder = new SimConfig.Builder()
         .docNumber(DEFAULT_DOC)
         .dateOfBirth(DEFAULT_DOB)
@@ -280,6 +292,19 @@ final class ScenarioRunner {
         ? reportPath.getParent().resolve("faces")
         : Paths.get("target", "ui-faces");
     builder.facePreviewDirectory(previewDir);
+
+    if (realProfile != null) {
+      builder.realPassportProfile(realProfile);
+      if (hasText(realProfile.getDocumentNumber())) {
+        builder.docNumber(realProfile.getDocumentNumber());
+      }
+      if (hasText(realProfile.getDateOfBirth())) {
+        builder.dateOfBirth(realProfile.getDateOfBirth());
+      }
+      if (hasText(realProfile.getDateOfExpiry())) {
+        builder.dateOfExpiry(realProfile.getDateOfExpiry());
+      }
+    }
 
     if (issuerResult != null) {
       builder.issuerResult(issuerResult);
