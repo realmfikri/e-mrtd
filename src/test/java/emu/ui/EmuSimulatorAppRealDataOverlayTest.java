@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import javafx.application.Platform;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -203,6 +205,74 @@ class EmuSimulatorAppRealDataOverlayTest {
     assertTrue(
         options.toArgs().contains("--doc=12345678"),
         "Scenario runner arguments should include filler-free document number");
+  }
+
+  @Test
+  void snapshotStripsFillersWhenUserShortensDocumentNumber() throws Exception {
+    assumeTrue(fxAvailable, "JavaFX toolkit unavailable in headless environment");
+
+    SessionReportViewData.MrzSummary summary = new SessionReportViewData.MrzSummary(
+        "L898902C<",
+        "640812",
+        "120415",
+        "SPECIMEN",
+        "ERIKA",
+        "UTO",
+        "UTO");
+
+    CountDownLatch latch = new CountDownLatch(1);
+    AtomicReference<AdvancedOptionsSnapshot> snapshotRef = new AtomicReference<>();
+    AtomicReference<Throwable> errorRef = new AtomicReference<>();
+
+    String userEntry = "L898902";
+
+    Platform.runLater(() -> {
+      try {
+        AdvancedOptionsPane pane = new AdvancedOptionsPane();
+        pane.applyMrzSummary(summary);
+
+        java.lang.reflect.Field field = AdvancedOptionsPane.class.getDeclaredField("docNumberField");
+        field.setAccessible(true);
+        TextField docField = (TextField) field.get(pane);
+        docField.setText(userEntry);
+
+        snapshotRef.set(pane.snapshot());
+      } catch (Throwable t) {
+        errorRef.set(t);
+      } finally {
+        latch.countDown();
+      }
+    });
+
+    if (!latch.await(5, TimeUnit.SECONDS)) {
+      fail("Timed out capturing advanced options snapshot after user edit");
+    }
+    if (errorRef.get() != null) {
+      fail(errorRef.get());
+    }
+
+    AdvancedOptionsSnapshot options = snapshotRef.get();
+    assertNotNull(options, "Advanced options snapshot should be captured after user edit");
+    assertEquals(
+        userEntry,
+        options.getDocumentNumber(),
+        "Snapshot should retain user-entered document number without MRZ fillers");
+
+    List<String> scenarioArgs = options.toArgs();
+    assertTrue(
+        scenarioArgs.contains("--doc=" + userEntry),
+        "Scenario arguments should contain filler-free document number");
+
+    ScenarioRunner runner = new ScenarioRunner();
+    java.lang.reflect.Method method = ScenarioRunner.class.getDeclaredMethod(
+        "buildIssuerAdvancedArgs",
+        AdvancedOptionsSnapshot.class);
+    method.setAccessible(true);
+    @SuppressWarnings("unchecked")
+    List<String> issuerArgs = (List<String>) method.invoke(runner, options);
+    assertTrue(
+        issuerArgs.contains("--doc-number=" + userEntry),
+        "Issuer arguments should contain filler-free document number");
   }
 
   @Test
