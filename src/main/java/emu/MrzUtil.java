@@ -44,7 +44,16 @@ public final class MrzUtil {
       return null;
     }
     String docNumber = mrzInfo.getDocumentNumber();
-    return hasText(docNumber) ? docNumber : null;
+    if (!hasText(docNumber)) {
+      return null;
+    }
+    String documentType;
+    try {
+      documentType = mrzInfo.getDocumentCode();
+    } catch (Exception ex) {
+      documentType = null;
+    }
+    return ensureDocumentNumberLength(docNumber, documentType);
   }
 
   /**

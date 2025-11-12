@@ -163,7 +163,7 @@ public final class SimRunner {
     }
     if (issuerJob != null && issuerJob.getMrzInfo() != null) {
       MRZInfo mrzInfo = issuerJob.getMrzInfo();
-      doc = mrzInfo.getDocumentNumber();
+      doc = MrzUtil.ensureDocumentNumberLength(mrzInfo.getDocumentNumber(), mrzInfo.getDocumentCode());
       dob = mrzInfo.getDateOfBirth();
       doe = mrzInfo.getDateOfExpiry();
     }
@@ -419,15 +419,17 @@ public final class SimRunner {
       if (in != null) {
         DG1File dg1 = new DG1File(in);
         MRZInfo info = dg1.getMRZInfo();
+        String docNumber =
+            MrzUtil.ensureDocumentNumberLength(info.getDocumentNumber(), info.getDocumentCode());
         System.out.println("==== DG1 ====");
-        System.out.println("Doc#: " + info.getDocumentNumber());
+        System.out.println("Doc#: " + docNumber);
         System.out.println("DOB  : " + info.getDateOfBirth());
         System.out.println("DOE  : " + info.getDateOfExpiry());
         System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
         System.out.println("Gender: " + info.getGender()); // jmrtd 0.8.x
         report.dataGroups.addPresent(1);
         report.dataGroups.setDg1Mrz(new SessionReport.MrzSummary(
-            info.getDocumentNumber(),
+            docNumber,
             info.getDateOfBirth(),
             info.getDateOfExpiry(),
             info.getPrimaryIdentifier(),
@@ -445,15 +447,17 @@ public final class SimRunner {
         try (ByteArrayInputStream fallback = new ByteArrayInputStream(dg1Bytes)) {
           DG1File dg1 = new DG1File(fallback);
           MRZInfo info = dg1.getMRZInfo();
+          String docNumber =
+              MrzUtil.ensureDocumentNumberLength(info.getDocumentNumber(), info.getDocumentCode());
           System.out.println("==== DG1 (artifact fallback) ====");
-          System.out.println("Doc#: " + info.getDocumentNumber());
+          System.out.println("Doc#: " + docNumber);
           System.out.println("DOB  : " + info.getDateOfBirth());
           System.out.println("DOE  : " + info.getDateOfExpiry());
           System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
           System.out.println("Gender: " + info.getGender());
           report.dataGroups.addPresent(1);
           report.dataGroups.setDg1Mrz(new SessionReport.MrzSummary(
-              info.getDocumentNumber(),
+              docNumber,
               info.getDateOfBirth(),
               info.getDateOfExpiry(),
               info.getPrimaryIdentifier(),
@@ -473,15 +477,17 @@ public final class SimRunner {
           DG1File dg1 = new DG1File(fallback);
           MRZInfo info = dg1.getMRZInfo();
           if (info != null) {
+            String docNumber =
+                MrzUtil.ensureDocumentNumberLength(info.getDocumentNumber(), info.getDocumentCode());
             System.out.println("==== DG1 (profile fallback) ====");
-            System.out.println("Doc#: " + info.getDocumentNumber());
+            System.out.println("Doc#: " + docNumber);
             System.out.println("DOB  : " + info.getDateOfBirth());
             System.out.println("DOE  : " + info.getDateOfExpiry());
             System.out.println("Name : " + info.getSecondaryIdentifier() + ", " + info.getPrimaryIdentifier());
             System.out.println("Gender: " + info.getGender());
             report.dataGroups.addPresent(1);
             report.dataGroups.setDg1Mrz(new SessionReport.MrzSummary(
-                info.getDocumentNumber(),
+                docNumber,
                 info.getDateOfBirth(),
                 info.getDateOfExpiry(),
                 info.getPrimaryIdentifier(),

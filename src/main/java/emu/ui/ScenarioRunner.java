@@ -2,6 +2,7 @@ package emu.ui;
 
 import emu.IssuerJobBuilder;
 import emu.IssuerSimulator;
+import emu.MrzUtil;
 import emu.PersonalizationJob;
 import emu.RealPassportProfile;
 import emu.SessionReport;
@@ -325,7 +326,7 @@ final class ScenarioRunner {
     if (realProfile != null) {
       builder.realPassportProfile(realProfile);
       if (hasText(realProfile.getDocumentNumber())) {
-        builder.docNumber(realProfile.getDocumentNumber());
+        builder.docNumber(MrzUtil.ensureDocumentNumberLength(realProfile.getDocumentNumber()));
       }
       if (hasText(realProfile.getDateOfBirth())) {
         builder.dateOfBirth(realProfile.getDateOfBirth());
@@ -339,7 +340,9 @@ final class ScenarioRunner {
       builder.issuerResult(issuerResult);
       PersonalizationJob job = issuerResult.getJob();
       if (job != null && job.getMrzInfo() != null) {
-        builder.docNumber(job.getMrzInfo().getDocumentNumber());
+        builder.docNumber(MrzUtil.ensureDocumentNumberLength(
+            job.getMrzInfo().getDocumentNumber(),
+            job.getMrzInfo().getDocumentCode()));
         builder.dateOfBirth(job.getMrzInfo().getDateOfBirth());
         builder.dateOfExpiry(job.getMrzInfo().getDateOfExpiry());
       }
