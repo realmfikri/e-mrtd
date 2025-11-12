@@ -1715,7 +1715,7 @@ public final class EmuSimulatorApp extends Application {
     }
     Map<Integer, byte[]> dataGroups = data.dataGroupBytes();
     return new RealPassportProfile(
-        data.documentNumber(),
+        MrzUtil.stripTrailingFillers(data.documentNumber()),
         data.dateOfBirth(),
         data.dateOfExpiry(),
         dataGroups,
@@ -1725,7 +1725,7 @@ public final class EmuSimulatorApp extends Application {
   }
 
   private SessionReportViewData.MrzSummary buildMrzSummary(RealPassportSnapshot data) {
-    String documentNumber = data.documentNumber();
+    String documentNumber = MrzUtil.stripTrailingFillers(data.documentNumber());
     String dateOfBirth = data.dateOfBirth();
     String dateOfExpiry = data.dateOfExpiry();
     String issuingState = null;
@@ -1736,8 +1736,8 @@ public final class EmuSimulatorApp extends Application {
     String gender = null;
 
     String mrz = data.mrz();
-    String derivedDocumentNumber = MrzUtil.deriveDocumentNumber(mrz);
-    if (hasText(derivedDocumentNumber)) {
+    String derivedDocumentNumber = MrzUtil.stripTrailingFillers(MrzUtil.deriveDocumentNumber(mrz));
+    if (!hasText(documentNumber) && hasText(derivedDocumentNumber)) {
       documentNumber = derivedDocumentNumber;
     }
     if (mrz != null && !mrz.isBlank()) {

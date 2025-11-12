@@ -137,7 +137,7 @@ class EmuSimulatorAppRealDataOverlayTest {
   }
 
   @Test
-  void mrzDocumentNumberCopiesWithPadding() throws Exception {
+  void mrzDocumentNumberStripsTrailingPadding() throws Exception {
     assumeTrue(fxAvailable, "JavaFX toolkit unavailable in headless environment");
 
     EmuSimulatorApp app = new EmuSimulatorApp();
@@ -192,8 +192,11 @@ class EmuSimulatorAppRealDataOverlayTest {
 
     AdvancedOptionsSnapshot options = snapshotRef.get();
     assertNotNull(options, "Advanced options snapshot should be captured");
-    assertEquals("12345678<", options.getDocumentNumber(), "MRZ document number should be padded");
-    assertEquals(9, options.getDocumentNumber().length(), "MRZ document number should be 9 characters");
+    assertEquals("12345678", options.getDocumentNumber(), "MRZ document number should strip trailing filler");
+    assertEquals(8, options.getDocumentNumber().length(), "MRZ document number length should match identifier");
+    assertTrue(
+        options.toArgs().contains("--doc=12345678"),
+        "Scenario runner arguments should include filler-free document number");
   }
 
   private static Label extractLabel(EmuSimulatorApp app, String fieldName) throws Exception {
