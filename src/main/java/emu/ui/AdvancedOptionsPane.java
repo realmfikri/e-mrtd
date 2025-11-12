@@ -1,5 +1,6 @@
 package emu.ui;
 
+import emu.MrzUtil;
 import emu.PersonalizationJob;
 
 import javafx.geometry.Insets;
@@ -169,6 +170,7 @@ final class AdvancedOptionsPane extends TitledPane {
 
     String docNumber = trimmed(docNumberField.getText());
     docNumber = normalizeDocumentNumber(docNumber);
+    docNumber = MrzUtil.stripTrailingFillers(docNumber);
 
     return new AdvancedOptionsSnapshot(
         comboValue(documentTypeBox),
