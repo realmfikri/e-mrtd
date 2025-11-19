@@ -65,10 +65,18 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.Signature;
+import java.security.KeyPair;
+import java.security.interfaces.ECPrivateKey;
 import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.AlgorithmParameterSpec;
+import java.security.spec.ECField;
+import java.security.spec.ECFieldF2m;
+import java.security.spec.ECFieldFp;
+import java.security.spec.ECParameterSpec;
+import java.security.spec.ECPoint;
+import java.security.spec.EllipticCurve;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Instant;
@@ -661,6 +669,9 @@ public final class SimRunner {
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
     writeBinary(ch, sodBytes, "WRITE EF.SOD");
 
+    if (artifacts.getChipAuthKeyPair() != null) {
+      seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
+    }
     if (artifacts.getAaKeyPair() != null && artifacts.getAaKeyPair().getPrivate() != null) {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
@@ -712,6 +723,9 @@ public final class SimRunner {
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
     writeBinary(ch, sodBytes, "WRITE EF.SOD");
 
+    if (artifacts.getChipAuthKeyPair() != null) {
+      seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
+    }
     if (artifacts.getAaKeyPair() != null && artifacts.getAaKeyPair().getPrivate() != null) {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
@@ -757,6 +771,23 @@ public final class SimRunner {
     }
 
     System.out.println("Skipped seeding Chip/Active Authentication private keys (not available in profile).");
+  }
+
+  private static void seedChipAuthenticationKey(CardChannel ch, KeyPair chipKeyPair) throws Exception {
+    if (chipKeyPair == null) {
+      return;
+    }
+    PrivateKey privateKey = chipKeyPair.getPrivate();
+    PublicKey publicKey = chipKeyPair.getPublic();
+    if (!(privateKey instanceof ECPrivateKey) || !(publicKey instanceof ECPublicKey)) {
+      System.out.println("Skipping Chip Authentication key seed: expected EC key pair.");
+      return;
+    }
+    byte[] keyTlv = buildEcPrivateKeyTlv((ECPrivateKey) privateKey, (ECPublicKey) publicKey);
+    int sw = putData(ch, 0x00, 0x63, keyTlv, "PUT Chip Authentication EC private key TLV");
+    if (sw != 0x9000) {
+      throw new RuntimeException(String.format("Failed to seed Chip Authentication key (SW=%04X)", sw));
+    }
   }
 
   private static void writeDefaultTrustAnchors(SODArtifacts artifacts)
@@ -832,6 +863,109 @@ public final class SimRunner {
     writeLength(out, keyBytes.length);
     out.write(keyBytes, 0, keyBytes.length);
     return out.toByteArray();
+  }
+
+  private static byte[] buildEcPrivateKeyTlv(ECPrivateKey privateKey, ECPublicKey publicKey) {
+    ECParameterSpec params = privateKey.getParams();
+    if (params == null && publicKey != null) {
+      params = publicKey.getParams();
+    }
+    if (params == null) {
+      throw new IllegalArgumentException("EC key is missing domain parameters");
+    }
+    EllipticCurve curve = params.getCurve();
+    int fieldLength = (curve.getField().getFieldSize() + 7) / 8;
+    int orderLength = (params.getOrder().bitLength() + 7) / 8;
+
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    writeEcFieldDescriptor(out, curve.getField(), fieldLength);
+    writeEcParameter(out, 0x82, toUnsigned(curve.getA(), fieldLength));
+    writeEcParameter(out, 0x83, toUnsigned(curve.getB(), fieldLength));
+    writeEcParameter(out, 0x84, encodeEcPoint(params.getGenerator(), fieldLength));
+    writeEcParameter(out, 0x85, toUnsigned(params.getOrder(), orderLength));
+    writeEcParameter(out, 0x86, toUnsigned(privateKey.getS(), orderLength));
+    int cofactor = params.getCofactor();
+    if (cofactor > 0) {
+      writeEcParameter(out, 0x87, toUnsigned(BigInteger.valueOf(cofactor), -1));
+    }
+    return out.toByteArray();
+  }
+
+  private static void writeEcFieldDescriptor(ByteArrayOutputStream out, ECField field, int fieldLength) {
+    byte[] value;
+    if (field instanceof ECFieldFp) {
+      ECFieldFp fp = (ECFieldFp) field;
+      value = toUnsigned(fp.getP(), fieldLength);
+    } else if (field instanceof ECFieldF2m) {
+      ECFieldF2m f2m = (ECFieldF2m) field;
+      int[] midTerms = f2m.getMidTermsOfReductionPolynomial();
+      if (midTerms == null || midTerms.length == 0) {
+        throw new IllegalArgumentException("Binary field is missing reduction polynomial terms");
+      }
+      ByteArrayOutputStream fieldBytes = new ByteArrayOutputStream();
+      if (midTerms.length == 1) {
+        writeShort(fieldBytes, (short) midTerms[0]);
+      } else if (midTerms.length == 3) {
+        for (int term : midTerms) {
+          writeShort(fieldBytes, (short) term);
+        }
+      } else {
+        throw new IllegalArgumentException("Unsupported binary field configuration");
+      }
+      value = fieldBytes.toByteArray();
+    } else {
+      throw new IllegalArgumentException("Unsupported EC field: " + field.getClass());
+    }
+    writeEcParameter(out, 0x81, value);
+  }
+
+  private static byte[] encodeEcPoint(ECPoint point, int fieldLength) {
+    if (point == null) {
+      throw new IllegalArgumentException("EC point is required");
+    }
+    byte[] x = toUnsigned(point.getAffineX(), fieldLength);
+    byte[] y = toUnsigned(point.getAffineY(), fieldLength);
+    ByteArrayOutputStream encoded = new ByteArrayOutputStream(1 + x.length + y.length);
+    encoded.write(0x04);
+    encoded.write(x, 0, x.length);
+    encoded.write(y, 0, y.length);
+    return encoded.toByteArray();
+  }
+
+  private static void writeEcParameter(ByteArrayOutputStream out, int tag, byte[] value) {
+    if (value == null) {
+      throw new IllegalArgumentException("EC parameter value is required");
+    }
+    writeTag(out, tag);
+    writeLength(out, value.length);
+    out.write(value, 0, value.length);
+  }
+
+  private static void writeShort(ByteArrayOutputStream out, short value) {
+    out.write((value >> 8) & 0xFF);
+    out.write(value & 0xFF);
+  }
+
+  private static byte[] toUnsigned(BigInteger value, int targetLength) {
+    if (value == null) {
+      throw new IllegalArgumentException("Value must not be null");
+    }
+    byte[] raw = value.toByteArray();
+    if (raw.length > 1 && raw[0] == 0x00) {
+      raw = Arrays.copyOfRange(raw, 1, raw.length);
+    }
+    if (targetLength > 0) {
+      if (raw.length > targetLength) {
+        throw new IllegalArgumentException("Value exceeds requested length");
+      }
+      if (raw.length == targetLength) {
+        return raw;
+      }
+      byte[] padded = new byte[targetLength];
+      System.arraycopy(raw, 0, padded, targetLength - raw.length, raw.length);
+      return padded;
+    }
+    return raw;
   }
 
   private static void writeTag(ByteArrayOutputStream out, int tag) {
