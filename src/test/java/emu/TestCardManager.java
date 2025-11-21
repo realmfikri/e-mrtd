@@ -20,7 +20,10 @@ import org.jmrtd.lds.icao.MRZInfo;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
 import java.security.PrivateKey;
+import java.security.interfaces.ECPrivateKey;
+import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.util.Arrays;
 
@@ -131,6 +134,8 @@ final class TestCardManager {
     createEF(channel, PassportService.EF_SOD, sodBytes.length);
     selectEF(channel, PassportService.EF_SOD);
     writeBinary(channel, sodBytes);
+
+    seedChipAuthenticationKey(channel, artifacts.getChipAuthKeyPair());
 
     if (tamperDg1) {
       byte[] mutated = Arrays.copyOf(dg1Bytes, dg1Bytes.length);
@@ -260,37 +265,29 @@ final class TestCardManager {
     return outer.toByteArray();
   }
 
+  private static void seedChipAuthenticationKey(CardChannel channel, KeyPair keyPair) throws Exception {
+    if (keyPair == null) {
+      return;
+    }
+    if (!(keyPair.getPrivate() instanceof ECPrivateKey) || !(keyPair.getPublic() instanceof ECPublicKey)) {
+      throw new IllegalArgumentException("Chip Authentication key pair must be EC");
+    }
+    byte[] keyTlv = KeyEncodingUtil.buildEcPrivateKeyTlv(
+        (ECPrivateKey) keyPair.getPrivate(),
+        (ECPublicKey) keyPair.getPublic());
+    putData(channel, 0x00, 0x63, keyTlv);
+  }
+
   private static void seedActiveAuthenticationKey(CardChannel channel, PrivateKey privateKey) throws Exception {
     if (!(privateKey instanceof RSAPrivateKey)) {
       return;
     }
     RSAPrivateKey rsaKey = (RSAPrivateKey) privateKey;
-    byte[] modulus = stripLeadingZero(rsaKey.getModulus().toByteArray());
-    byte[] exponent = stripLeadingZero(rsaKey.getPrivateExponent().toByteArray());
+    byte[] modulus = KeyEncodingUtil.stripLeadingZero(rsaKey.getModulus().toByteArray());
+    byte[] exponent = KeyEncodingUtil.stripLeadingZero(rsaKey.getPrivateExponent().toByteArray());
 
-    putData(channel, 0x00, 0x60, buildRsaPrivateKeyTlv(0x60, modulus));
-    putData(channel, 0x00, 0x61, buildRsaPrivateKeyTlv(0x61, exponent));
-  }
-
-  private static byte[] buildRsaPrivateKeyTlv(int containerTag, byte[] keyBytes) {
-    ByteArrayOutputStream out = new ByteArrayOutputStream();
-    writeTag(out, containerTag);
-    writeLength(out, 0);
-    writeTag(out, 0x04);
-    writeLength(out, keyBytes.length);
-    out.write(keyBytes, 0, keyBytes.length);
-    return out.toByteArray();
-  }
-
-  private static byte[] stripLeadingZero(byte[] input) {
-    if (input.length <= 1 || input[0] != 0x00) {
-      return input;
-    }
-    int index = 0;
-    while (index < input.length - 1 && input[index] == 0x00) {
-      index++;
-    }
-    return Arrays.copyOfRange(input, index, input.length);
+    putData(channel, 0x00, 0x60, KeyEncodingUtil.buildRsaPrivateKeyTlv(0x60, modulus));
+    putData(channel, 0x00, 0x61, KeyEncodingUtil.buildRsaPrivateKeyTlv(0x61, exponent));
   }
 
   private static void writeTag(ByteArrayOutputStream out, int tag) {

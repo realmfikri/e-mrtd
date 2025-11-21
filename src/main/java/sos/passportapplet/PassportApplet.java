@@ -635,17 +635,27 @@ public class PassportApplet extends Applet implements ISO7816 {
             return 0;
         }
 
-        if (!hasEACKey() || !hasEACCertificate()) {
-            ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+        boolean chipAuthSetAt = p1 == P1_SETFORCOMPUTATION && p2 == P2_AT;
+        boolean chipAuthKat = p1 == P1_SETFORCOMPUTATION && p2 == P2_KAT;
+        boolean terminalAuthSelect = p1 == P1_SETFORVERIFICATION && (p2 == P2_DST || p2 == P2_AT);
+
+        if (chipAuthSetAt || chipAuthKat) {
+            if (!hasEACKey()) {
+                ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+            }
+        } else {
+            if (!hasEACCertificate()) {
+                ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+            }
         }
         if ((!hasMutuallyAuthenticated() && !hasPaceEstablished()) || hasTerminalAuthenticated()) {
             ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
         }
-        if (p1 == P1_SETFORCOMPUTATION && p2 == P2_AT) {
+        if (chipAuthSetAt) {
             processChipAuthenticationSetAt(buffer, buffer_p, lc);
             return 0;
         }
-        if (p1 == P1_SETFORCOMPUTATION && p2 == P2_KAT) {
+        if (chipAuthKat) {
 
             short lastOffset = (short) (lc + OFFSET_CDATA);
             if (buffer_p > (short) (lastOffset - 2)) {
@@ -684,7 +694,7 @@ public class PassportApplet extends Applet implements ISO7816 {
                 applyChipAuthenticationSecureMessaging();
             }
             return 0;
-        } else if (p1 == P1_SETFORVERIFICATION && (p2 == P2_DST || p2 == P2_AT)) {
+        } else if (terminalAuthSelect) {
             if (!hasChipAuthenticated() || hasTerminalAuthenticated()) {
                 ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
             }

@@ -65,10 +65,18 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.Signature;
+import java.security.KeyPair;
+import java.security.interfaces.ECPrivateKey;
 import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.AlgorithmParameterSpec;
+import java.security.spec.ECField;
+import java.security.spec.ECFieldF2m;
+import java.security.spec.ECFieldFp;
+import java.security.spec.ECParameterSpec;
+import java.security.spec.ECPoint;
+import java.security.spec.EllipticCurve;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Instant;
@@ -360,17 +368,16 @@ public final class SimRunner {
     if (dg14 != null) {
       report.dataGroups.addPresent(14);
     }
+    DG15File dg15 = readDG15(svc);
+    if (dg15 != null) {
+      report.dataGroups.addPresent(15);
+    }
     ChipAuthOutcome chipAuthOutcome = performChipAuthenticationIfSupported(
         svc,
         dg14,
         chipPrivateKeyAvailable);
     report.session.caEstablished = chipAuthOutcome.established;
     System.out.printf("caEstablished=%s%n", chipAuthOutcome.established);
-
-    DG15File dg15 = readDG15(svc);
-    if (dg15 != null) {
-      report.dataGroups.addPresent(15);
-    }
     ActiveAuthOutcome activeAuthOutcome = performActiveAuthentication(
         loggingService,
         svc,
@@ -661,6 +668,9 @@ public final class SimRunner {
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
     writeBinary(ch, sodBytes, "WRITE EF.SOD");
 
+    if (artifacts.getChipAuthKeyPair() != null) {
+      seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
+    }
     if (artifacts.getAaKeyPair() != null && artifacts.getAaKeyPair().getPrivate() != null) {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
@@ -712,6 +722,9 @@ public final class SimRunner {
     selectEF(ch, EF_SOD, "SELECT EF.SOD before WRITE");
     writeBinary(ch, sodBytes, "WRITE EF.SOD");
 
+    if (artifacts.getChipAuthKeyPair() != null) {
+      seedChipAuthenticationKey(ch, artifacts.getChipAuthKeyPair());
+    }
     if (artifacts.getAaKeyPair() != null && artifacts.getAaKeyPair().getPrivate() != null) {
       seedActiveAuthenticationKey(ch, artifacts.getAaKeyPair().getPrivate());
     }
@@ -757,6 +770,23 @@ public final class SimRunner {
     }
 
     System.out.println("Skipped seeding Chip/Active Authentication private keys (not available in profile).");
+  }
+
+  private static void seedChipAuthenticationKey(CardChannel ch, KeyPair chipKeyPair) throws Exception {
+    if (chipKeyPair == null) {
+      return;
+    }
+    PrivateKey privateKey = chipKeyPair.getPrivate();
+    PublicKey publicKey = chipKeyPair.getPublic();
+    if (!(privateKey instanceof ECPrivateKey) || !(publicKey instanceof ECPublicKey)) {
+      System.out.println("Skipping Chip Authentication key seed: expected EC key pair.");
+      return;
+    }
+    byte[] keyTlv = KeyEncodingUtil.buildEcPrivateKeyTlv((ECPrivateKey) privateKey, (ECPublicKey) publicKey);
+    int sw = putData(ch, 0x00, 0x63, keyTlv, "PUT Chip Authentication EC private key TLV");
+    if (sw != 0x9000) {
+      throw new RuntimeException(String.format("Failed to seed Chip Authentication key (SW=%04X)", sw));
+    }
   }
 
   private static void writeDefaultTrustAnchors(SODArtifacts artifacts)
@@ -806,63 +836,22 @@ public final class SimRunner {
       return;
     }
     RSAPrivateKey rsaKey = (RSAPrivateKey) privateKey;
-    byte[] modulus = stripLeadingZero(rsaKey.getModulus().toByteArray());
-    byte[] exponent = stripLeadingZero(rsaKey.getPrivateExponent().toByteArray());
+    byte[] modulus = KeyEncodingUtil.stripLeadingZero(rsaKey.getModulus().toByteArray());
+    byte[] exponent = KeyEncodingUtil.stripLeadingZero(rsaKey.getPrivateExponent().toByteArray());
 
-    byte[] modulusTlv = buildRsaPrivateKeyTlv(0x60, modulus);
+    byte[] modulusTlv = KeyEncodingUtil.buildRsaPrivateKeyTlv(0x60, modulus);
     int sw = putData(ch, 0x00, 0x60, modulusTlv, "PUT AA modulus TLV");
     if (sw != 0x9000) {
       throw new RuntimeException(String.format("Failed to seed AA modulus (SW=%04X)", sw));
     }
 
-    byte[] exponentTlv = buildRsaPrivateKeyTlv(0x61, exponent);
+    byte[] exponentTlv = KeyEncodingUtil.buildRsaPrivateKeyTlv(0x61, exponent);
     sw = putData(ch, 0x00, 0x61, exponentTlv, "PUT AA exponent TLV");
     if (sw != 0x9000) {
       throw new RuntimeException(String.format("Failed to seed AA exponent (SW=%04X)", sw));
     }
   }
 
-  private static byte[] buildRsaPrivateKeyTlv(int containerTag, byte[] keyBytes) {
-    ByteArrayOutputStream out = new ByteArrayOutputStream();
-    writeTag(out, containerTag);
-    // The applet expects the outer container length to be zero and treats the nested
-    // OCTET STRING as a sibling TLV (legacy PUT DATA layout).
-    writeLength(out, 0);
-    writeTag(out, 0x04);
-    writeLength(out, keyBytes.length);
-    out.write(keyBytes, 0, keyBytes.length);
-    return out.toByteArray();
-  }
-
-  private static void writeTag(ByteArrayOutputStream out, int tag) {
-    if (tag > 0xFF) {
-      out.write((tag >> 8) & 0xFF);
-    }
-    out.write(tag & 0xFF);
-  }
-
-  private static void writeLength(ByteArrayOutputStream out, int length) {
-    if (length < 0x80) {
-      out.write(length);
-    } else {
-      int numBytes = (Integer.SIZE - Integer.numberOfLeadingZeros(length) + 7) / 8;
-      out.write(0x80 | numBytes);
-      for (int i = numBytes - 1; i >= 0; i--) {
-        out.write((length >> (8 * i)) & 0xFF);
-      }
-    }
-  }
-
-  private static byte[] stripLeadingZero(byte[] input) {
-    if (input.length <= 1 || input[0] != 0x00) {
-      return input;
-    }
-    int index = 0;
-    while (index < input.length - 1 && input[index] == 0x00) {
-      index++;
-    }
-    return Arrays.copyOfRange(input, index, input.length);
-  }
 
   private static String resolveTransport(CardTerminal terminal, Card card) {
     if (card != null) {
@@ -1256,16 +1245,26 @@ public final class SimRunner {
     }
     try {
       String caOid = outcome.selectedInfo.getObjectIdentifier();
-      String agreementAlg = ChipAuthenticationInfo.toKeyAgreementAlgorithm(caOid);
+      if (!hasText(caOid)) {
+        caOid = outcome.selectedInfo.getProtocolOIDString();
+      }
+      if (!hasText(caOid)) {
+        throw new IllegalStateException("Selected Chip Authentication profile is missing an OID");
+      }
+      String agreementAlg = null;
+      try {
+        agreementAlg = ChipAuthenticationInfo.toKeyAgreementAlgorithm(caOid);
+      } catch (Exception ignore) {
+      }
       String cipherAlg = ChipAuthenticationInfo.toCipherAlgorithm(caOid);
-      EACCAResult result = svc.doEACCA(keyId, agreementAlg, cipherAlg, publicKeyInfo.getSubjectPublicKey());
+      EACCAResult result = svc.doEACCA(keyId, caOid, cipherAlg, publicKeyInfo.getSubjectPublicKey());
       outcome.result = result;
       outcome.established = result != null && result.getWrapper() != null;
       if (outcome.established) {
         securityPrintln(String.format(
             "Chip Authentication established (agreement=%s cipher=%s keyId=%s).",
-            agreementAlg,
-            cipherAlg,
+            agreementAlg != null ? agreementAlg : caOid,
+            cipherAlg != null ? cipherAlg : caOid,
             keyId != null ? keyId.toString(16) : "n/a"));
         logSecureMessagingTransition(
             "Chip Authentication",
@@ -1581,16 +1580,26 @@ public final class SimRunner {
   }
 
   private static ChipAuthenticationInfo selectPreferredChipAuth(List<ChipAuthenticationInfo> chipInfos) {
-    return chipInfos.stream()
+    if (chipInfos == null || chipInfos.isEmpty()) {
+      return null;
+    }
+    List<ChipAuthenticationInfo> supported = chipInfos.stream()
+        .filter(SimRunner::isChipAuthCipherSupported)
+        .collect(Collectors.toList());
+    List<ChipAuthenticationInfo> candidates = supported.isEmpty() ? chipInfos : supported;
+    return candidates.stream()
         .max(Comparator.comparingInt(SimRunner::resolveChipKeyLength))
-        .orElse(chipInfos.get(0));
+        .orElse(candidates.get(0));
   }
 
   private static int resolveChipKeyLength(ChipAuthenticationInfo info) {
     if (info == null) {
       return 0;
     }
-    String oid = info.getProtocolOIDString();
+    String oid = info.getObjectIdentifier();
+    if (!hasText(oid)) {
+      oid = info.getProtocolOIDString();
+    }
     if (oid == null) {
       return 0;
     }
@@ -1598,6 +1607,27 @@ public final class SimRunner {
       return ChipAuthenticationInfo.toKeyLength(oid);
     } catch (Exception e) {
       return 0;
+    }
+  }
+
+  private static boolean isChipAuthCipherSupported(ChipAuthenticationInfo info) {
+    if (info == null) {
+      return false;
+    }
+    String oid = info.getObjectIdentifier();
+    if (!hasText(oid)) {
+      oid = info.getProtocolOIDString();
+    }
+    if (!hasText(oid)) {
+      return false;
+    }
+    try {
+      String cipher = ChipAuthenticationInfo.toCipherAlgorithm(oid);
+      // The simulator applet only implements the 3DES-based CA secure messaging profile. Reject
+      // AES-based entries so JMRTD prefers the DESede variant and exercises the supported path.
+      return cipher == null || cipher.startsWith("DESede");
+    } catch (Exception e) {
+      return false;
     }
   }
 
