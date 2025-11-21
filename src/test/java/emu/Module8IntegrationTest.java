@@ -5,11 +5,15 @@ import net.sf.scuba.smartcards.ResponseAPDU;
 import net.sf.scuba.smartcards.TerminalCardService;
 
 import org.jmrtd.PassportService;
+import org.jmrtd.lds.ChipAuthenticationInfo;
+import org.jmrtd.lds.ChipAuthenticationPublicKeyInfo;
 import org.jmrtd.lds.PACEInfo;
 import org.jmrtd.lds.SecurityInfo;
+import org.jmrtd.lds.icao.DG14File;
 import org.jmrtd.lds.icao.DG15File;
 import org.jmrtd.protocol.AAResult;
 import org.jmrtd.protocol.BACResult;
+import org.jmrtd.protocol.EACCAResult;
 import org.jmrtd.protocol.PACEResult;
 import org.jmrtd.protocol.SecureMessagingWrapper;
 
@@ -25,8 +29,11 @@ import java.security.GeneralSecurityException;
 import java.security.PublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.AlgorithmParameterSpec;
+import java.math.BigInteger;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 
 import emu.PassiveAuthentication.Result;
 import emu.PassiveAuthentication.ChainValidation;
@@ -179,6 +186,64 @@ class Module8IntegrationTest {
   }
 
   @Test
+  void chipAuthenticationAllowsReadingDg15() throws Exception {
+    PassportService service = card.passportService;
+
+    PACEInfo paceInfo = new PACEInfo(
+        SecurityInfo.ID_PACE_ECDH_GM_AES_CBC_CMAC_128,
+        2,
+        PACEInfo.PARAM_ID_ECP_NIST_P256_R1);
+    PACEResult paceResult = service.doPACE(
+        org.jmrtd.PACEKeySpec.createMRZKey(card.bacKey),
+        paceInfo.getObjectIdentifier(),
+        PACEInfo.toParameterSpec(paceInfo.getParameterId()),
+        paceInfo.getParameterId());
+    assertNotNull(paceResult.getWrapper(), "PACE must establish secure messaging");
+
+    byte[] dg14Bytes = readFile(service, PassportService.EF_DG14);
+    assertNotNull(dg14Bytes);
+    assertTrue(dg14Bytes.length > 0, "DG14 should be readable after PACE");
+
+    byte[] dg15BeforeCa = readFile(service, PassportService.EF_DG15);
+    assertNotNull(dg15BeforeCa);
+    assertTrue(dg15BeforeCa.length > 0, "DG15 should be readable before CA");
+
+    DG14File dg14 = new DG14File(new java.io.ByteArrayInputStream(dg14Bytes));
+    List<ChipAuthenticationInfo> caInfos = dg14.getChipAuthenticationInfos();
+    Comparator<ChipAuthenticationInfo> byKeyLength = Comparator.comparingInt(info -> {
+      try {
+        return ChipAuthenticationInfo.toKeyLength(info.getObjectIdentifier());
+      } catch (Exception e) {
+        return 0;
+      }
+    });
+    ChipAuthenticationInfo caInfo = caInfos.stream()
+        .filter(Module8IntegrationTest::isDesedeChipAuth)
+        .max(byKeyLength)
+        .orElse(caInfos.stream().max(byKeyLength)
+            .orElseThrow(() -> new IllegalStateException("CA profile missing")));
+
+    BigInteger keyId = caInfo.getKeyId();
+    ChipAuthenticationPublicKeyInfo caPublic = dg14.getChipAuthenticationPublicKeyInfos().stream()
+        .filter(info -> Objects.equals(info.getKeyId(), keyId))
+        .findFirst()
+        .orElseThrow(() -> new IllegalStateException("CA public key missing"));
+
+    EACCAResult caResult = service.doEACCA(
+        keyId,
+        caInfo.getObjectIdentifier(),
+        ChipAuthenticationInfo.toCipherAlgorithm(caInfo.getObjectIdentifier()),
+        caPublic.getSubjectPublicKey());
+    assertNotNull(caResult);
+    assertNotNull(caResult.getWrapper(), "CA must upgrade secure messaging");
+
+    byte[] dg15AfterCa = readFile(service, PassportService.EF_DG15);
+    assertNotNull(dg15AfterCa);
+    assertTrue(dg15AfterCa.length > 0, "DG15 must remain readable after CA");
+    assertArrayEquals(dg15BeforeCa, dg15AfterCa, "DG15 contents must remain stable across CA");
+  }
+
+  @Test
   void secureMessagingRejectsReplay() throws Exception {
     PassportService service = card.passportService;
     TerminalCardService raw = card.terminalService;
@@ -217,6 +282,18 @@ class Module8IntegrationTest {
         out.write(buffer, 0, read);
       }
       return out.toByteArray();
+    }
+  }
+
+  private static boolean isDesedeChipAuth(ChipAuthenticationInfo info) {
+    if (info == null) {
+      return false;
+    }
+    try {
+      String cipher = ChipAuthenticationInfo.toCipherAlgorithm(info.getObjectIdentifier());
+      return cipher == null || cipher.startsWith("DESede");
+    } catch (Exception e) {
+      return false;
     }
   }
 
