@@ -1311,9 +1311,9 @@ public final class SimRunner {
     SECURE_RANDOM.nextBytes(challenge);
     outcome.challenge = challenge.clone();
     int expectedResponseLength = expectedAaResponseLength(outcome.publicKey);
+    String digestAlgorithm = resolveAADigestAlgorithm(outcome.publicKey);
+    String signatureAlgorithm = resolveAASignatureAlgorithm(outcome.publicKey);
     try {
-      String digestAlgorithm = resolveAADigestAlgorithm(outcome.publicKey);
-      String signatureAlgorithm = resolveAASignatureAlgorithm(outcome.publicKey);
       AAResult result = svc.doAA(outcome.publicKey, digestAlgorithm, signatureAlgorithm, challenge);
       outcome.attempted = result != null;
       if (result != null) {
@@ -1347,7 +1347,14 @@ public final class SimRunner {
       }
     } catch (Exception e) {
       outcome.failure = e;
-      securityPrintln("Active Authentication failed: " + e.getMessage());
+      if (e instanceof CardServiceException) {
+        securityPrintln(
+            "Active Authentication failed under secure messaging: " + e.getMessage()
+                + "; retrying without protection.");
+        retryPlainActiveAuth(rawService, outcome, challenge);
+      } else {
+        securityPrintln("Active Authentication failed: " + e.getMessage());
+      }
     } finally {
       Arrays.fill(challenge, (byte) 0x00);
     }
@@ -1376,6 +1383,30 @@ public final class SimRunner {
       return true;
     }
     return expectedResponseLength > 0 && response.length != expectedResponseLength;
+  }
+
+  private static void retryPlainActiveAuth(CardService rawService, ActiveAuthOutcome outcome, byte[] challenge) {
+    try {
+      outcome.response = tryPlainInternalAuthenticate(rawService, challenge);
+      outcome.attempted = true;
+      outcome.verified = verifyActiveAuthenticationSignature(outcome.publicKey, challenge, outcome.response);
+      if (outcome.verified) {
+        Integer keyBits = describeKeyBits(outcome.publicKey);
+        if (keyBits != null) {
+          securityPrintln(String.format("Active Authentication verified without SM (%s %d-bit).",
+              outcome.publicKey.getAlgorithm(), keyBits));
+        } else {
+          securityPrintln(String.format("Active Authentication verified without SM (%s).",
+              outcome.publicKey.getAlgorithm()));
+        }
+        outcome.failure = null;
+      } else {
+        securityPrintln("Active Authentication attempt did not verify signature after SM retry.");
+      }
+    } catch (Exception retryError) {
+      outcome.failure = retryError;
+      securityPrintln("Active Authentication plain retry failed: " + retryError.getMessage());
+    }
   }
 
   private static Integer describeKeyBits(PublicKey key) {
