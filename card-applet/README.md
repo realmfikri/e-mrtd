@@ -1,80 +1,114 @@
 # card-applet
 
-This directory is the home for card applet workstreams and related assets.
+Educational Java Card applet and tooling for a **demo eMRTD-like** command flow.
 
-## Structure
+> **Security scope warning:** this applet is for demonstration/testing only, not for real document issuance, border-control use, or impersonation scenarios.
 
-- `applet-src/` — source code for the applet implementation.
-- `tools/` — helper scripts and utilities used during development.
-- `spec-notes/` — notes and references derived from relevant specifications.
-- `sample-data/` — example inputs/outputs and test vectors.
-- `build/` — local build artifacts output target.
+## Build the CAP (exact commands)
 
-## Reproducible CAP build entrypoint
+The build is driven by `card-applet/Makefile` and requires both `JCPATH` and `JAVA_HOME`.
 
-Use `card-applet/Makefile` to compile Java Card sources and generate a CAP file.
-
-### Compatibility
-
-- Java Card Development Kit: **2.2.1** (recommended, verified layout expected by the Makefile).
-- Java runtime for tooling: set `JAVA_HOME` to a JDK that works with your Java Card kit installation (commonly JDK 8 for legacy 2.2.x kits).
-
-### Required environment variables
-
-- `JCPATH` — path to Java Card kit root (must contain `lib/api.jar`, `lib/converter.jar`, and `api_export_files/`).
-- `JAVA_HOME` — path to JDK root (must contain `bin/javac` and `bin/java`).
-
-### Build command examples
-
-From repository root:
+### 1) One-shot build from repository root
 
 ```bash
 JCPATH=/opt/java_card_kit-2_2_1 \
 JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 \
-make -C card-applet
+make -C card-applet clean all
 ```
 
-From inside `card-applet/`:
+### 2) Build from inside `card-applet/`
 
 ```bash
+cd card-applet
 export JCPATH=/opt/java_card_kit-2_2_1
 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
-make
+make clean all
 ```
 
-### Output
+### What the Makefile expects
 
-- Final CAP artifact: `card-applet/build/applet.cap`.
+- `JAVA_HOME/bin/javac` and `JAVA_HOME/bin/java`
+- `JCPATH/lib/api.jar`
+- `JCPATH/lib/converter.jar`
+- `JCPATH/lib/offcardverifier.jar`
+- `JCPATH/api_export_files/`
 
-## PC/SC smoke-check script
+## Verify CAP output path
 
-A minimal reader-side verification script is available at:
+The Makefile copies the converter output to `card-applet/build/applet.cap`.
 
-- `tools/pcsc_smoke_read.py`
+Run one of these checks:
 
-It performs the following checks against the educational applet:
+```bash
+test -f card-applet/build/applet.cap && echo "CAP OK: card-applet/build/applet.cap"
+```
 
-1. `SELECT` by AID and expects status word `9000`.
-2. `SELECT` EF by FID for `EF.COM` (`011E`) and `EF.DG1` (`0101`) and expects `9000`.
-3. `READ BINARY` using offsets and verifies the returned bytes against:
-   - `sample-data/EF.COM.bin`
-   - `sample-data/EF.DG1.bin`
-4. Prints each status word and a pass/fail summary.
+```bash
+ls -l card-applet/build/applet.cap
+```
 
-### Usage examples
+## Install/create with GlobalPlatformPro (`gp`)
+
+Default values from the Makefile:
+
+- Package AID: `D2760001240100`
+- Applet AID: `D276000124010001`
+- Applet class: `cardapplet.EducationalEmrtdApplet`
+- CAP file: `card-applet/build/applet.cap`
+
+### Simple install (uses CAP metadata)
+
+```bash
+gp -install card-applet/build/applet.cap
+```
+
+### Explicit package/applet/create install
+
+```bash
+gp -install card-applet/build/applet.cap \
+  -package D2760001240100 \
+  -applet D276000124010001 \
+  -create D276000124010001
+```
+
+### Optional: install then create as separate steps
+
+```bash
+gp -install card-applet/build/applet.cap -package D2760001240100 -applet D276000124010001
+```
+
+```bash
+gp -create D276000124010001
+```
+
+> Tip: add your reader selector flags (for example `-r <reader>`) as needed for your environment.
+
+## Run the smoke-test tool
+
+The smoke-test script validates SELECT and READ BINARY behavior against `sample-data/EF.COM.bin` and `sample-data/EF.DG1.bin`.
+
+Basic run:
 
 ```bash
 python3 card-applet/tools/pcsc_smoke_read.py --reader-index 0
-python3 card-applet/tools/pcsc_smoke_read.py --reader-filter ACS --reader-filter Contact
-python3 card-applet/tools/pcsc_smoke_read.py --reader "Identive CLOUD 3700 F Contact Reader 00 00"
 ```
 
-Optional connection-string selector examples:
+Alternative selectors:
+
+```bash
+python3 card-applet/tools/pcsc_smoke_read.py --reader "Exact Reader Name"
+```
+
+```bash
+python3 card-applet/tools/pcsc_smoke_read.py --reader-filter ACS --reader-filter Contact
+```
+
+Connection-string form:
 
 ```bash
 python3 card-applet/tools/pcsc_smoke_read.py --connection-string 'pcsc://index/0'
-python3 card-applet/tools/pcsc_smoke_read.py --connection-string 'pcsc://filter/ACS'
-python3 card-applet/tools/pcsc_smoke_read.py --connection-string 'pcsc://Identive CLOUD 3700 F Contact Reader 00 00'
 ```
 
-> Note: the script requires `pyscard` (`pip install pyscard`) and a working PC/SC service/reader.
+## Spec notes
+
+See `card-applet/spec-notes/part10-part11-part12-scope.md` for a mapping of ICAO Part 10 requirements to implemented behavior and explicit Part 11/12 scope boundaries.
