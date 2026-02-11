@@ -45,3 +45,36 @@ make
 ### Output
 
 - Final CAP artifact: `card-applet/build/applet.cap`.
+
+## PC/SC smoke-check script
+
+A minimal reader-side verification script is available at:
+
+- `tools/pcsc_smoke_read.py`
+
+It performs the following checks against the educational applet:
+
+1. `SELECT` by AID and expects status word `9000`.
+2. `SELECT` EF by FID for `EF.COM` (`011E`) and `EF.DG1` (`0101`) and expects `9000`.
+3. `READ BINARY` using offsets and verifies the returned bytes against:
+   - `sample-data/EF.COM.bin`
+   - `sample-data/EF.DG1.bin`
+4. Prints each status word and a pass/fail summary.
+
+### Usage examples
+
+```bash
+python3 card-applet/tools/pcsc_smoke_read.py --reader-index 0
+python3 card-applet/tools/pcsc_smoke_read.py --reader-filter ACS --reader-filter Contact
+python3 card-applet/tools/pcsc_smoke_read.py --reader "Identive CLOUD 3700 F Contact Reader 00 00"
+```
+
+Optional connection-string selector examples:
+
+```bash
+python3 card-applet/tools/pcsc_smoke_read.py --connection-string 'pcsc://index/0'
+python3 card-applet/tools/pcsc_smoke_read.py --connection-string 'pcsc://filter/ACS'
+python3 card-applet/tools/pcsc_smoke_read.py --connection-string 'pcsc://Identive CLOUD 3700 F Contact Reader 00 00'
+```
+
+> Note: the script requires `pyscard` (`pip install pyscard`) and a working PC/SC service/reader.
