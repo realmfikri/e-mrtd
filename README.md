@@ -53,6 +53,48 @@ mvn -q -DskipTests clean package
 - `clean` removes previous build outputs.
 - `package` compiles sources, runs checks (tests skipped here), and assembles the application.
 
+### Build a JavaCard CAP (for real card deployment)
+If your goal is to install the eMRTD applet on a physical JavaCard, you need a **CAP** artifact (not only the Maven JAR/classes used by this simulator).
+
+This repository already includes a legacy JavaCard build flow under:
+
+```bash
+libs/passportapplet-0.0.2b-src/passportapplet
+```
+
+The included JavaCard metadata is:
+
+- Package AID: `A0:00:00:02:47:10`
+- Applet AID: `A0:00:00:02:47:10:01`
+
+Build steps:
+
+```bash
+cd libs/passportapplet-0.0.2b-src/passportapplet
+
+# Point this to your JavaCard kit (2.2.1 expected by the Makefile)
+export JAVA_HOME=/path/to/jdk8-or-compatible
+make JCPATH=/path/to/java_card_kit-2_2_1 clean all
+```
+
+Expected output:
+
+```bash
+applet.cap
+```
+
+Then install to a card/reader with GlobalPlatformPro (force your NFC/PICC reader):
+
+```bash
+gp -r
+gp -r "PICC" -install applet.cap
+gp -r "PICC" -l
+```
+
+> ⚠️ Notes:
+> - The CAP build path is separate from the Maven simulator build and uses JavaCard classic toolchain conventions.
+> - The applet sources in `src/main/java/sos/passportapplet` target simulator/runtime testing. For card deployment, use the JavaCard-oriented source tree and tooling under `libs/passportapplet-0.0.2b-src/passportapplet`.
+
 ## 🚀 Run Scenarios
 
 ### JavaFX UI Launcher
