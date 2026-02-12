@@ -5,6 +5,7 @@ import javacard.framework.APDU;
 import javacard.framework.Applet;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
+import javacard.framework.JCSystem;
 import javacard.framework.Util;
 
 /**
@@ -104,7 +105,8 @@ public final class EducationalEmrtdApplet extends Applet {
     }
 
     private void selectByAid(byte[] buffer, short lc) {
-        AID thisAid = getAID();
+        // Applet.getAID() is not available on all Java Card API variants; use JCSystem.getAID().
+        AID thisAid = JCSystem.getAID();
         if (!thisAid.partialEquals(buffer, ISO7816.OFFSET_CDATA, (byte) lc)) {
             ISOException.throwIt(SW_FILE_NOT_FOUND);
         }

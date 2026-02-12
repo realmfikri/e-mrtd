@@ -16,6 +16,11 @@ target/
 .DS_Store
 Thumbs.db
 
+# Java Card build outputs / local tool downloads
+card-applet/build/
+java_card_*.zip*
+java_card_devkit_*.zip*
+
 # Download artifacts (biar repo ringan)
 libs/**/*.zip
 libs/**/*.cap

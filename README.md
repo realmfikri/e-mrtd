@@ -54,20 +54,28 @@ mvn -q -DskipTests clean package
 - `package` compiles sources, runs checks (tests skipped here), and assembles the application.
 
 ### Build a JavaCard CAP (for real card deployment)
-If your goal is to install the eMRTD applet on a physical JavaCard, you need a **CAP** artifact (not only the Maven JAR/classes used by this simulator).
+If your goal is to install an applet on a physical JavaCard, you need a **CAP** artifact (not only the Maven JAR/classes used by this simulator).
 
-This repository already includes a legacy JavaCard build flow under:
+This repository includes two separate Java Card build flows:
 
 ```bash
-libs/passportapplet-0.0.2b-src/passportapplet
+card-applet/
 ```
 
-The included JavaCard metadata is:
+`card-applet/` is the maintained, minimal, educational applet with scripts to build/install/test on a card.
 
-- Package AID: `A0:00:00:02:47:10`
-- Applet AID: `A0:00:00:02:47:10:01`
+Build + install:
 
-Build steps:
+```bash
+export JAVA_HOME=/path/to/jdk
+export JCKIT=/path/to/jckit
+
+./card-applet/build.sh
+./card-applet/tools/install.sh
+./card-applet/tools/apdu_smoke.sh
+```
+
+There is also a legacy JavaCard applet source tree under:
 
 ```bash
 cd libs/passportapplet-0.0.2b-src/passportapplet
@@ -92,8 +100,8 @@ gp -r "PICC" -l
 ```
 
 > ⚠️ Notes:
-> - The CAP build path is separate from the Maven simulator build and uses JavaCard classic toolchain conventions.
-> - The applet sources in `src/main/java/sos/passportapplet` target simulator/runtime testing. For card deployment, use the JavaCard-oriented source tree and tooling under `libs/passportapplet-0.0.2b-src/passportapplet`.
+> - These CAP build flows are separate from the Maven simulator build.
+> - `card-applet/` is intended for simple APDU demo/testing flows; it is not a full passport implementation.
 
 ## 🚀 Run Scenarios
 

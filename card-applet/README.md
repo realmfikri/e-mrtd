@@ -6,10 +6,29 @@ Educational Java Card applet and tooling for a **demo eMRTD-like** command flow.
 
 ## Prerequisites
 
-- **Java/JDK**: JDK 8+ with `JAVA_HOME` set (the build flow uses `javac` and `java`).
-- **Java Card Development Kit**: set `JCKIT` to your Java Card kit path (legacy `JCPATH` is accepted and mapped to `JCKIT`).
+- **Java/JDK**: a JDK with `JAVA_HOME` set (the build invokes `javac` and `java`).
+  - The CAP conversion toolchain typically expects **Java 8 classfiles**, so the Makefile compiles with `--release 8` by default.
+- **Java Card kit**: set `JCKIT` to your Java Card kit path (legacy `JCPATH` is accepted and mapped to `JCKIT`).
 - **GlobalPlatformPro (`gp`)**: required to install/delete applets on card/simulator.
 - **OpenSC (`opensc-tool`)**: useful for reader/PCSC troubleshooting.
+
+### Supported Java Card kit layouts
+
+This repo supports two common `JCKIT` layouts:
+
+1. Classic SDK layout (older):
+   - `lib/api.jar`
+   - `lib/converter.jar`
+   - `lib/offcardverifier.jar` (optional here, but common in classic SDKs)
+   - `api_export_files/`
+
+2. Tools-only layout (newer, like `java_card_devkit_tools`):
+   - `bin/converter.sh`
+   - `lib/tools.jar`
+   - `lib/api_classic-<version>.jar`
+   - export files are embedded inside `tools.jar` (extracted during build into `card-applet/build/jckit_exports/`)
+
+If you have a tools-only kit, set `JCKIT` to the directory that contains `bin/` and `lib/` (not a nested folder name).
 
 ## Commands
 
@@ -18,9 +37,21 @@ Run from repository root unless noted.
 - **Build**
 
   ```bash
+  export JAVA_HOME=/path/to/jdk
+  export JCKIT=/path/to/jckit
   ./card-applet/build.sh
   # or:
   make -C card-applet
+  ```
+
+  Useful overrides:
+
+  ```bash
+  # If your card is not Java Card 3.2.0, set the target platform version used by converter/export files.
+  make -C card-applet JC_TARGET=3.0.5
+
+  # If you want to change the Java classfile level (converter usually wants 8 / classfile 52.0).
+  make -C card-applet JAVAC_RELEASE=8
   ```
 
 - **Install**
@@ -40,6 +71,39 @@ Run from repository root unless noted.
   ```bash
   ./card-applet/tools/apdu_smoke.sh
   ```
+
+## Installing To A Physical Card
+
+1. Build a CAP:
+
+   ```bash
+   export JAVA_HOME=/path/to/jdk
+   export JCKIT=/path/to/jckit
+   ./card-applet/build.sh
+   ```
+
+   Output is `card-applet/build/applet.cap`.
+
+2. Install using GlobalPlatformPro:
+
+   ```bash
+   # Optional: override reader name (see `gp -r` to list readers)
+   export GP_READER="ACR1552 1S CL Reader PICC"
+
+   ./card-applet/tools/install.sh
+   ```
+
+3. Run a quick APDU sanity check:
+
+   ```bash
+   ./card-applet/tools/apdu_smoke.sh
+   ```
+
+4. Uninstall (optional):
+
+   ```bash
+   ./card-applet/tools/uninstall.sh
+   ```
 
 ## Implemented behavior
 
