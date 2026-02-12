@@ -16,8 +16,6 @@ CAP_OUT := $(BUILD_DIR)/applet.cap
 SAMPLE_DIR := sample-data
 SAMPLE_EF_COM := $(SAMPLE_DIR)/EF_COM.bin
 SAMPLE_DG1 := $(SAMPLE_DIR)/DG1.bin
-SAMPLE_EF_COM_LEGACY := $(SAMPLE_DIR)/EF.COM.bin
-SAMPLE_DG1_LEGACY := $(SAMPLE_DIR)/EF.DG1.bin
 
 JAVAC := $(JAVA_HOME)/bin/javac
 JAVA := $(JAVA_HOME)/bin/java
@@ -41,20 +39,12 @@ check-env:
 prepare-sample-data:
 	@mkdir -p "$(SAMPLE_DIR)"
 	@if [ ! -f "$(SAMPLE_EF_COM)" ]; then \
-		printf 'TEST ONLY: SYNTHETIC EF_COM\nNOT FOR REAL DOCUMENTS\n' > "$(SAMPLE_EF_COM)"; \
+		printf 'TEST ONLY EF_COM\nFICTIONAL DEMO LDS\n' > "$(SAMPLE_EF_COM)"; \
 		echo "Generated synthetic $(SAMPLE_EF_COM)"; \
 	fi
 	@if [ ! -f "$(SAMPLE_DG1)" ]; then \
-		printf 'TEST ONLY: SYNTHETIC DG1\nNOT AN MRZ\nNO REAL PERSON DATA\n' > "$(SAMPLE_DG1)"; \
+		printf 'TEST ONLY DG1\nFICTIONAL HOLDER: DOE<<ALEX\n' > "$(SAMPLE_DG1)"; \
 		echo "Generated synthetic $(SAMPLE_DG1)"; \
-	fi
-	@if [ ! -f "$(SAMPLE_EF_COM_LEGACY)" ]; then \
-		cp "$(SAMPLE_EF_COM)" "$(SAMPLE_EF_COM_LEGACY)"; \
-		echo "Backfilled legacy $(SAMPLE_EF_COM_LEGACY) from $(SAMPLE_EF_COM)"; \
-	fi
-	@if [ ! -f "$(SAMPLE_DG1_LEGACY)" ]; then \
-		cp "$(SAMPLE_DG1)" "$(SAMPLE_DG1_LEGACY)"; \
-		echo "Backfilled legacy $(SAMPLE_DG1_LEGACY) from $(SAMPLE_DG1)"; \
 	fi
 
 $(CLASS_DIR):
