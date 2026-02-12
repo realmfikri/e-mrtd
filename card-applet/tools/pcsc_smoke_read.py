@@ -14,7 +14,7 @@ import pathlib
 import sys
 from dataclasses import dataclass
 
-DEFAULT_AID = bytes.fromhex("D276000124010001")
+DEFAULT_AID = bytes.fromhex("A000000247100001")
 EF_COM_FID = bytes.fromhex("011E")
 EF_DG1_FID = bytes.fromhex("0101")
 

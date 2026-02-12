@@ -51,8 +51,8 @@ ls -l card-applet/build/applet.cap
 
 Default values from the Makefile:
 
-- Package AID: `D2760001240100`
-- Applet AID: `D276000124010001`
+- Package AID: `A0000002471000`
+- Applet AID: `A000000247100001`
 - Applet class: `cardapplet.EducationalEmrtdApplet`
 - CAP file: `card-applet/build/applet.cap`
 
@@ -66,19 +66,19 @@ gp -install card-applet/build/applet.cap
 
 ```bash
 gp -install card-applet/build/applet.cap \
-  -package D2760001240100 \
-  -applet D276000124010001 \
-  -create D276000124010001
+  -package A0000002471000 \
+  -applet A000000247100001 \
+  -create A000000247100001
 ```
 
 ### Optional: install then create as separate steps
 
 ```bash
-gp -install card-applet/build/applet.cap -package D2760001240100 -applet D276000124010001
+gp -install card-applet/build/applet.cap -package A0000002471000 -applet A000000247100001
 ```
 
 ```bash
-gp -create D276000124010001
+gp -create A000000247100001
 ```
 
 > Tip: add your reader selector flags (for example `-r <reader>`) as needed for your environment.

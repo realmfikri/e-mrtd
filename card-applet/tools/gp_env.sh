@@ -6,8 +6,8 @@ set -euo pipefail
 export GP_READER="${GP_READER:-ACR1552 1S CL Reader PICC}"
 
 # Project AIDs / artifacts.
-export GP_PACKAGE_AID="${GP_PACKAGE_AID:-D2760001240100}"
-export GP_APPLET_AID="${GP_APPLET_AID:-D276000124010001}"
+export GP_PACKAGE_AID="${GP_PACKAGE_AID:-A0000002471000}"
+export GP_APPLET_AID="${GP_APPLET_AID:-A000000247100001}"
 export GP_CAP_REL="${GP_CAP_REL:-card-applet/build/applet.cap}"
 
 # NFC-friendly defaults; callers can tune with GP_NFC_BLOCK_SIZE and GP_RETRIES.
