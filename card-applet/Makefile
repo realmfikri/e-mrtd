@@ -13,24 +13,49 @@ CLASS_DIR := $(BUILD_DIR)/classes
 CAP_TMP := $(BUILD_DIR)/$(PACKAGE_NAME)/javacard/$(PACKAGE_NAME).cap
 CAP_OUT := $(BUILD_DIR)/applet.cap
 
+SAMPLE_DIR := sample-data
+SAMPLE_EF_COM := $(SAMPLE_DIR)/EF_COM.bin
+SAMPLE_DG1 := $(SAMPLE_DIR)/DG1.bin
+SAMPLE_EF_COM_LEGACY := $(SAMPLE_DIR)/EF.COM.bin
+SAMPLE_DG1_LEGACY := $(SAMPLE_DIR)/EF.DG1.bin
+
 JAVAC := $(JAVA_HOME)/bin/javac
 JAVA := $(JAVA_HOME)/bin/java
-JC_API := $(JCPATH)/lib/api.jar
-JC_CONVERTER_CP := $(JCPATH)/lib/converter.jar:$(JCPATH)/lib/offcardverifier.jar
-JC_EXPORTS := $(JCPATH)/api_export_files
+JC_API := $(JCKIT)/lib/api.jar
+JC_CONVERTER_CP := $(JCKIT)/lib/converter.jar:$(JCKIT)/lib/offcardverifier.jar
+JC_EXPORTS := $(JCKIT)/api_export_files
 
-.PHONY: all clean check-env compile cap
+.PHONY: all clean check-env compile cap prepare-sample-data
 
-all: $(CAP_OUT)
+all: prepare-sample-data $(CAP_OUT)
 
 check-env:
 	@test -n "$(JAVA_HOME)" || { echo "ERROR: JAVA_HOME must be set"; exit 1; }
-	@test -n "$(JCPATH)" || { echo "ERROR: JCPATH must be set"; exit 1; }
+	@test -n "$(JCKIT)" || { echo "ERROR: JCKIT must be set"; exit 1; }
 	@test -x "$(JAVAC)" || { echo "ERROR: javac not found at $(JAVAC)"; exit 1; }
 	@test -x "$(JAVA)" || { echo "ERROR: java not found at $(JAVA)"; exit 1; }
 	@test -f "$(JC_API)" || { echo "ERROR: Java Card api.jar not found at $(JC_API)"; exit 1; }
-	@test -f "$(JCPATH)/lib/converter.jar" || { echo "ERROR: converter.jar not found at $(JCPATH)/lib/converter.jar"; exit 1; }
+	@test -f "$(JCKIT)/lib/converter.jar" || { echo "ERROR: converter.jar not found at $(JCKIT)/lib/converter.jar"; exit 1; }
 	@test -d "$(JC_EXPORTS)" || { echo "ERROR: api_export_files not found at $(JC_EXPORTS)"; exit 1; }
+
+prepare-sample-data:
+	@mkdir -p "$(SAMPLE_DIR)"
+	@if [ ! -f "$(SAMPLE_EF_COM)" ]; then \
+		printf 'TEST ONLY: SYNTHETIC EF_COM\nNOT FOR REAL DOCUMENTS\n' > "$(SAMPLE_EF_COM)"; \
+		echo "Generated synthetic $(SAMPLE_EF_COM)"; \
+	fi
+	@if [ ! -f "$(SAMPLE_DG1)" ]; then \
+		printf 'TEST ONLY: SYNTHETIC DG1\nNOT AN MRZ\nNO REAL PERSON DATA\n' > "$(SAMPLE_DG1)"; \
+		echo "Generated synthetic $(SAMPLE_DG1)"; \
+	fi
+	@if [ ! -f "$(SAMPLE_EF_COM_LEGACY)" ]; then \
+		cp "$(SAMPLE_EF_COM)" "$(SAMPLE_EF_COM_LEGACY)"; \
+		echo "Backfilled legacy $(SAMPLE_EF_COM_LEGACY) from $(SAMPLE_EF_COM)"; \
+	fi
+	@if [ ! -f "$(SAMPLE_DG1_LEGACY)" ]; then \
+		cp "$(SAMPLE_DG1)" "$(SAMPLE_DG1_LEGACY)"; \
+		echo "Backfilled legacy $(SAMPLE_DG1_LEGACY) from $(SAMPLE_DG1)"; \
+	fi
 
 $(CLASS_DIR):
 	@mkdir -p "$(CLASS_DIR)"

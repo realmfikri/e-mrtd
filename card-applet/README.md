@@ -6,32 +6,40 @@ Educational Java Card applet and tooling for a **demo eMRTD-like** command flow.
 
 ## Build the CAP (exact commands)
 
-The build is driven by `card-applet/Makefile` and requires both `JCPATH` and `JAVA_HOME`.
+The canonical build entrypoint is `card-applet/build.sh` and requires both `JCKIT` and `JAVA_HOME` (legacy `JCPATH` is auto-mapped to `JCKIT` for compatibility).
 
-### 1) One-shot build from repository root
+### 1) Canonical one-command build from repository root
+
+```bash
+JCKIT=/opt/java_card_kit-2_2_1 \
+JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 \
+./card-applet/build.sh
+```
+
+### 2) Equivalent build from inside `card-applet/`
+
+```bash
+cd card-applet
+export JCKIT=/opt/java_card_kit-2_2_1
+export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+./build.sh
+```
+
+### 3) Legacy compatibility (`JCPATH`)
 
 ```bash
 JCPATH=/opt/java_card_kit-2_2_1 \
 JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 \
-make -C card-applet clean all
-```
-
-### 2) Build from inside `card-applet/`
-
-```bash
-cd card-applet
-export JCPATH=/opt/java_card_kit-2_2_1
-export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
-make clean all
+./card-applet/build.sh
 ```
 
 ### What the Makefile expects
 
 - `JAVA_HOME/bin/javac` and `JAVA_HOME/bin/java`
-- `JCPATH/lib/api.jar`
-- `JCPATH/lib/converter.jar`
-- `JCPATH/lib/offcardverifier.jar`
-- `JCPATH/api_export_files/`
+- `JCKIT/lib/api.jar`
+- `JCKIT/lib/converter.jar`
+- `JCKIT/lib/offcardverifier.jar`
+- `JCKIT/api_export_files/`
 
 ## Verify CAP output path
 
@@ -86,6 +94,8 @@ gp -create A000000247100001
 ## Run the smoke-test tool
 
 The smoke-test script validates SELECT and READ BINARY behavior against `sample-data/EF.COM.bin` and `sample-data/EF.DG1.bin`.
+
+During build, missing `sample-data/EF_COM.bin` and `sample-data/DG1.bin` are auto-generated with synthetic `TEST ONLY` markers, and legacy dotted filenames are backfilled if absent.
 
 Basic run:
 
