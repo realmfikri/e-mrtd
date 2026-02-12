@@ -132,7 +132,7 @@ def parse_args() -> argparse.Namespace:
         "--sample-dir",
         type=pathlib.Path,
         default=pathlib.Path(__file__).resolve().parents[1] / "sample-data",
-        help="Directory containing EF.COM.bin and EF.DG1.bin (default: %(default)s)",
+        help="Directory containing EF_COM.bin and DG1.bin (default: %(default)s)",
     )
     return parser.parse_args()
 
@@ -167,8 +167,8 @@ def main() -> int:
         print(f"ERROR: invalid --aid hex: {args.aid!r}")
         return 2
 
-    ef_com = load_bytes(args.sample_dir / "EF.COM.bin")
-    ef_dg1 = load_bytes(args.sample_dir / "EF.DG1.bin")
+    ef_com = load_bytes(args.sample_dir / "EF_COM.bin")
+    ef_dg1 = load_bytes(args.sample_dir / "DG1.bin")
 
     readers, CardConnectionException, NoReadersException = import_pcsc()
 

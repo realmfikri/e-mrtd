@@ -17,7 +17,7 @@ The implementation is intentionally minimal and supports a tiny, fixed file mode
 | Select elementary file by file ID | `SELECT` (`INS=A4`, `P1=00` or `02`) accepts 2-byte FID. Known FIDs (`011E`, `0101`) become current EF; unknown FID returns `6A82`. | `applet-src/EducationalEmrtdApplet.java` (`selectByFid`), smoke test `SELECT EF.COM` / `SELECT EF.DG1`. |
 | Read data from selected EF | `READ BINARY` (`INS=B0`) returns slices from current EF based on offset and Le. Supports offset-based reads used by host tools. | `applet-src/EducationalEmrtdApplet.java` (`processReadBinary`), smoke test read-slice checks. |
 | Status words for malformed/unsupported use | Uses `6700` for wrong length, `6A86` for wrong P1/P2 on unsupported SELECT mode, `6B00` for invalid offset, `6A82` for missing file, and standard `6D00` for unsupported INS. | Constants and throws in `applet-src/EducationalEmrtdApplet.java`. |
-| Deterministic sample payloads for EF content checks | EF.COM and EF.DG1 are static in-applet byte arrays; sample-data files mirror expected reads for smoke validation. | `applet-src/EducationalEmrtdApplet.java`; `sample-data/EF.COM.bin`; `sample-data/EF.DG1.bin`; `tools/pcsc_smoke_read.py`. |
+| Deterministic sample payloads for EF content checks | EF.COM and EF.DG1 are static in-applet byte arrays; sample-data files mirror expected reads for smoke validation. | `applet-src/EducationalEmrtdApplet.java`; `sample-data/EF_COM.bin`; `sample-data/DG1.bin`; `tools/pcsc_smoke_read.py`. |
 
 ### Operational command/file linkage
 

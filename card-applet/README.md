@@ -93,9 +93,9 @@ gp -create A000000247100001
 
 ## Run the smoke-test tool
 
-The smoke-test script validates SELECT and READ BINARY behavior against `sample-data/EF.COM.bin` and `sample-data/EF.DG1.bin`.
+The smoke-test script validates SELECT and READ BINARY behavior against `sample-data/EF_COM.bin` and `sample-data/DG1.bin`.
 
-During build, missing `sample-data/EF_COM.bin` and `sample-data/DG1.bin` are auto-generated with synthetic `TEST ONLY` markers, and legacy dotted filenames are backfilled if absent.
+During build, missing `sample-data/EF_COM.bin` and `sample-data/DG1.bin` are auto-generated with synthetic `TEST ONLY` markers, and demo placeholders are created if absent.
 
 Basic run:
 
