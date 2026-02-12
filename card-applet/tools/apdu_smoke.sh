@@ -13,7 +13,7 @@ if [[ -n "$OPENSC_READER" ]]; then
   OPENSC_TOOL_ARGS+=(--reader "$OPENSC_READER")
 fi
 
-APPLET_AID_HEX="${APPLET_AID_HEX:-D276000124010001}"
+APPLET_AID_HEX="${APPLET_AID_HEX:-A000000247100001}"
 
 print_result() {
   local label="$1"
