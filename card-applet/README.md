@@ -4,119 +4,104 @@ Educational Java Card applet and tooling for a **demo eMRTD-like** command flow.
 
 > **Security scope warning:** this applet is for demonstration/testing only, not for real document issuance, border-control use, or impersonation scenarios.
 
-## Build the CAP (exact commands)
+## Prerequisites
 
-The canonical build entrypoint is `card-applet/build.sh` and requires both `JCKIT` and `JAVA_HOME` (legacy `JCPATH` is auto-mapped to `JCKIT` for compatibility).
+- **Java/JDK**: JDK 8+ with `JAVA_HOME` set (the build flow uses `javac` and `java`).
+- **Java Card Development Kit**: set `JCKIT` to your Java Card kit path (legacy `JCPATH` is accepted and mapped to `JCKIT`).
+- **GlobalPlatformPro (`gp`)**: required to install/delete applets on card/simulator.
+- **OpenSC (`opensc-tool`)**: useful for reader/PCSC troubleshooting.
 
-### 1) Canonical one-command build from repository root
+## Commands
 
-```bash
-JCKIT=/opt/java_card_kit-2_2_1 \
-JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 \
-./card-applet/build.sh
-```
+Run from repository root unless noted.
 
-### 2) Equivalent build from inside `card-applet/`
+- **Build**
 
-```bash
-cd card-applet
-export JCKIT=/opt/java_card_kit-2_2_1
-export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
-./build.sh
-```
+  ```bash
+  ./card-applet/build.sh
+  # or:
+  make -C card-applet
+  ```
 
-### 3) Legacy compatibility (`JCPATH`)
+- **Install**
 
-```bash
-JCPATH=/opt/java_card_kit-2_2_1 \
-JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 \
-./card-applet/build.sh
-```
+  ```bash
+  ./card-applet/tools/install.sh
+  ```
 
-### What the Makefile expects
+- **Uninstall**
 
-- `JAVA_HOME/bin/javac` and `JAVA_HOME/bin/java`
-- `JCKIT/lib/api.jar`
-- `JCKIT/lib/converter.jar`
-- `JCKIT/lib/offcardverifier.jar`
-- `JCKIT/api_export_files/`
+  ```bash
+  ./card-applet/tools/uninstall.sh
+  ```
 
-## Verify CAP output path
+- **Smoke test**
 
-The Makefile copies the converter output to `card-applet/build/applet.cap`.
+  ```bash
+  ./card-applet/tools/apdu_smoke.sh
+  ```
 
-Run one of these checks:
+## Implemented behavior
 
-```bash
-test -f card-applet/build/applet.cap && echo "CAP OK: card-applet/build/applet.cap"
-```
+- `SELECT` by applet AID (`00 A4 04 0C ...`).
+- `SELECT FILE` by FID (`00 A4 02 0C 02 <FID>`).
+- `READ BINARY` offset-based reads (`00 B0 <offset_hi> <offset_lo> <Le>`).
+- `EF.COM` and `DG1` are available for smoke/demo flows.
 
-```bash
-ls -l card-applet/build/applet.cap
-```
+## Not implemented
 
-## Install/create with GlobalPlatformPro (`gp`)
+- BAC/PACE.
+- Secure messaging.
+- Real `EF.SOD` signatures or production passport semantics.
 
-Default values from the Makefile:
+## Troubleshooting appendix
 
-- Package AID: `A0000002471000`
-- Applet AID: `A000000247100001`
-- Applet class: `cardapplet.EducationalEmrtdApplet`
-- CAP file: `card-applet/build/applet.cap`
+Manual APDU examples (hex, spaces optional):
 
-### Simple install (uses CAP metadata)
+- **Select applet by AID**
 
-```bash
-gp -install card-applet/build/applet.cap
-```
+  ```text
+  00 A4 04 0C 08 A0 00 00 02 47 10 00 01
+  ```
 
-### Explicit package/applet/create install
+  Expected status word: `9000`.
 
-```bash
-gp -install card-applet/build/applet.cap \
-  -package A0000002471000 \
-  -applet A000000247100001 \
-  -create A000000247100001
-```
+- **Select EF.COM by FID (`011E`)**
 
-### Optional: install then create as separate steps
+  ```text
+  00 A4 02 0C 02 01 1E
+  ```
 
-```bash
-gp -install card-applet/build/applet.cap -package A0000002471000 -applet A000000247100001
-```
+  Expected status word: `9000`.
 
-```bash
-gp -create A000000247100001
-```
+- **Read first bytes from selected EF (offset `0000`, Le `10`)**
 
-> Tip: add your reader selector flags (for example `-r <reader>`) as needed for your environment.
+  ```text
+  00 B0 00 00 10
+  ```
 
-## Run the smoke-test tool
+  Expected status word: `9000` (with up to `0x10` response bytes).
 
-The smoke-test script validates SELECT and READ BINARY behavior against `sample-data/EF_COM.bin` and `sample-data/DG1.bin`.
+- **Select DG1 by FID (`0101`)**
 
-During build, missing `sample-data/EF_COM.bin` and `sample-data/DG1.bin` are auto-generated with synthetic `TEST ONLY` markers, and demo placeholders are created if absent.
+  ```text
+  00 A4 02 0C 02 01 01
+  ```
 
-Basic run:
+  Expected status word: `9000`.
 
-```bash
-python3 card-applet/tools/pcsc_smoke_read.py --reader-index 0
-```
+- **Read DG1 slice (offset `0010`, Le `20`)**
 
-Alternative selectors:
+  ```text
+  00 B0 00 10 20
+  ```
+
+  Expected status word: `9000` while in range; out-of-range reads may return an error status depending on card/runtime.
+
+If APDUs fail, verify reader visibility first:
 
 ```bash
-python3 card-applet/tools/pcsc_smoke_read.py --reader "Exact Reader Name"
-```
-
-```bash
-python3 card-applet/tools/pcsc_smoke_read.py --reader-filter ACS --reader-filter Contact
-```
-
-Connection-string form:
-
-```bash
-python3 card-applet/tools/pcsc_smoke_read.py --connection-string 'pcsc://index/0'
+opensc-tool -l
 ```
 
 ## Spec notes
