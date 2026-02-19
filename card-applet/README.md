@@ -208,7 +208,7 @@ Manual APDU examples (hex, spaces optional):
 - **Write EF bytes (offset `0000`)**
 
   ```text
-  00 D6 00 00 10 46 53 44 45 4D 4F 5F 57 52 49 54 45 5F 54 45 53 54
+  00 D6 00 00 10 46 53 44 45 4D 4F 5F 57 52 49 54 45 5F 54 45 53
   ```
 
   Expected status word: `9000`.
