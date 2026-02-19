@@ -80,6 +80,7 @@ run_apdus_gp() {
   local output pairs label expect resp sw data
   local -a pair_lines
 
+  # Human-readable APDUs (without optional trailing Le for case-3 commands).
   APDUS=(
     "00A4040008${APPLET_AID_HEX}"
     "00A4020C02011E"
@@ -149,8 +150,19 @@ run_apdus_gp() {
     "00000000000000000000000000000000"
   )
 
-  gp_args=(--debug --verbose "${GP_COMMON_OPTS[@]}")
+  # Some gp builds reject case-3 APDUs unless an explicit trailing Le byte is present.
+  # Keep printed APDUs canonical while normalizing gp input for compatibility.
+  GP_APDUS=()
   for a in "${APDUS[@]}"; do
+    if (( ${#a} > 10 )); then
+      GP_APDUS+=("${a}00")
+    else
+      GP_APDUS+=("$a")
+    fi
+  done
+
+  gp_args=(--debug --verbose "${GP_COMMON_OPTS[@]}")
+  for a in "${GP_APDUS[@]}"; do
     gp_args+=(-a "$a")
   done
 

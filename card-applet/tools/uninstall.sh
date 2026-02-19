@@ -12,11 +12,30 @@ STAMP="$(date +%Y%m%d_%H%M%S)"
 REMOVE_LOG="$OUT_DIR/gp_uninstall_${STAMP}.log"
 POST_LOG="$OUT_DIR/gp_post_uninstall_${STAMP}.log"
 
+delete_aid() {
+  local label="$1"
+  local aid="$2"
+  local output
+
+  echo "[uninstall] Deleting ${label} AID: ${aid}"
+  if output="$(gp "${GP_COMMON_OPTS[@]}" -delete "$aid" 2>&1)"; then
+    printf '%s\n' "$output"
+    return 0
+  fi
+
+  printf '%s\n' "$output"
+  if printf '%s\n' "$output" | rg -qi "not present on card|6a88"; then
+    echo "[uninstall] ${label} AID not present; continuing."
+    return 0
+  fi
+
+  echo "[uninstall] ERROR: failed deleting ${label} AID: ${aid}"
+  return 1
+}
+
 {
-  echo "[uninstall] Deleting applet AID: $GP_APPLET_AID"
-  gp "${GP_COMMON_OPTS[@]}" -delete "$GP_APPLET_AID"
-  echo "[uninstall] Deleting package AID: $GP_PACKAGE_AID"
-  gp "${GP_COMMON_OPTS[@]}" -delete "$GP_PACKAGE_AID"
+  delete_aid "applet" "$GP_APPLET_AID"
+  delete_aid "package" "$GP_PACKAGE_AID"
 } >"$REMOVE_LOG" 2>&1
 
 echo "[uninstall] Capturing post-uninstall listing -> $POST_LOG"

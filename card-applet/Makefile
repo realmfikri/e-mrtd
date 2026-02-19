@@ -92,7 +92,7 @@ prepare-sample-data:
 		echo "Generated synthetic $(SAMPLE_EF_COM)"; \
 	fi
 	@if [ ! -f "$(SAMPLE_DG1)" ]; then \
-		printf 'TEST ONLY DG1\nFICTIONAL HOLDER: DOE<<ALEX\n' > "$(SAMPLE_DG1)"; \
+		printf 'TEST ONLY DG1\nNAME: MUHAMAD FIKRI\nDOB: 11 FEBRUARI 2003\nSEX: MALE\nISSUING STATE/NATIONALITY: IDN\nPASSPORT NO: C4X9L2Q7\nEXPIRY DATE: 11 FEBRUARI 2028\n' > "$(SAMPLE_DG1)"; \
 		echo "Generated synthetic $(SAMPLE_DG1)"; \
 	fi
 

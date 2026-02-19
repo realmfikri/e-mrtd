@@ -89,6 +89,9 @@ Run from repository root unless noted.
    ```bash
    # Optional: override reader name (see `gp -r` to list readers)
    export GP_READER="ACR1552 1S CL Reader PICC"
+   # Recommended on ACR1552/contactless stacks:
+   export GP_NFC_BLOCK_SIZE=64
+   export GP_EXTRA_OPTS="--mode ENC --pcsc-exclusive"
 
    ./card-applet/tools/install.sh
    ```
@@ -233,6 +236,12 @@ If APDUs fail, verify reader visibility first:
 ```bash
 opensc-tool -l
 ```
+
+GlobalPlatform notes:
+
+- `tools/uninstall.sh` is idempotent: if applet/package AIDs are already absent (`6A88` or "not present on card"), it logs and continues.
+- On some cards, deleting the applet AID can return `6A88` while deleting the package AID succeeds. The script now attempts both and continues when AIDs are already missing.
+- `tools/apdu_smoke.sh` normalizes case-3 APDUs for `gp` compatibility by sending an explicit trailing `Le=00` when needed.
 
 ## Spec notes
 
