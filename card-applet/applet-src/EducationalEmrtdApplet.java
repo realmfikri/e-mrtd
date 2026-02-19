@@ -143,6 +143,9 @@ public final class EducationalEmrtdApplet extends Applet {
 
         if (fid == CardFileSystem.MF_FID) {
             target = fileSystem.getRoot();
+        } else if (currentDf != null && currentDf.fid == fid) {
+            // Allow re-selecting the current DF by its own FID.
+            target = currentDf;
         } else {
             target = fileSystem.findChildByFid(currentDf, fid);
         }
