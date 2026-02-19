@@ -109,8 +109,27 @@ Run from repository root unless noted.
 
 - `SELECT` by applet AID (`00 A4 04 0C ...`).
 - `SELECT FILE` by FID (`00 A4 02 0C 02 <FID>`).
+- `SELECT MF` (`3F00`) and a minimal in-memory filesystem demo.
+- `CREATE FILE` (`00 E0 00 00 ...`) for one DF and one transparent EF.
+- `UPDATE BINARY` (`00 D6 ...`) for writes to the created EF.
 - `READ BINARY` offset-based reads (`00 B0 <offset_hi> <offset_lo> <Le>`).
 - `EF.COM` and `DG1` are available for smoke/demo flows.
+
+### Filesystem demo scope
+
+This applet now supports a bounded educational filesystem flow:
+
+1. Select MF (`3F00`)
+2. Create one DF under MF
+3. Create one transparent EF under that DF
+4. Write bytes with `UPDATE BINARY`
+5. Read bytes back with `READ BINARY`
+
+Boundaries (intentional):
+
+- only one dynamic DF and one dynamic EF slot are supported
+- no delete/resize command
+- not a full ISO 7816 filesystem implementation
 
 ## Not implemented
 
@@ -161,6 +180,53 @@ Manual APDU examples (hex, spaces optional):
   ```
 
   Expected status word: `9000` while in range; out-of-range reads may return an error status depending on card/runtime.
+
+- **Select MF (`3F00`)**
+
+  ```text
+  00 A4 00 0C 02 3F 00
+  ```
+
+  Expected status word: `9000`.
+
+- **Create DF (`FID=1100`)**
+
+  ```text
+  00 E0 00 00 09 83 02 11 00 82 01 38
+  ```
+
+  Expected status word: `9000` (requires MF selected).
+
+- **Create EF (`FID=1101`, size=0x40)**
+
+  ```text
+  00 E0 00 00 0C 83 02 11 01 82 01 01 80 01 40
+  ```
+
+  Expected status word: `9000` (requires DF selected).
+
+- **Write EF bytes (offset `0000`)**
+
+  ```text
+  00 D6 00 00 10 46 53 44 45 4D 4F 5F 57 52 49 54 45 5F 54 45 53 54
+  ```
+
+  Expected status word: `9000`.
+
+- **Read EF bytes (offset `0000`, Le `10`)**
+
+  ```text
+  00 B0 00 00 10
+  ```
+
+  Expected status word: `9000` and previously written payload.
+
+Common SW notes for filesystem operations:
+
+- `6985`: wrong selection context (for example creating DF without selecting MF first, or EF without selecting DF first).
+- `6A80`: malformed CREATE FILE payload.
+- `6A81`: unsupported file descriptor or unsupported write target.
+- `6A84`: requested dynamic EF size exceeds implementation limit.
 
 If APDUs fail, verify reader visibility first:
 

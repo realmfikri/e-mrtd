@@ -8,6 +8,7 @@ The implementation is intentionally minimal and supports a tiny, fixed file mode
 
 - `EF.COM` at FID `011E`
 - `EF.DG1` at FID `0101`
+- demo MF/DF/EF flow: select `MF (3F00)`, create one DF, create one transparent EF, write/read binary
 
 ### Mapping table
 
@@ -15,6 +16,8 @@ The implementation is intentionally minimal and supports a tiny, fixed file mode
 |---|---|---|
 | Select the applet/DF by AID | `SELECT` (`INS=A4`, `P1=04`) compares incoming AID to applet AID and returns `9000` on match, `6A82` on mismatch. | `applet-src/EducationalEmrtdApplet.java` (`processSelect`, `selectByAid`); smoke test `SELECT AID` step in `tools/pcsc_smoke_read.py`. |
 | Select elementary file by file ID | `SELECT` (`INS=A4`, `P1=00` or `02`) accepts 2-byte FID. Known FIDs (`011E`, `0101`) become current EF; unknown FID returns `6A82`. | `applet-src/EducationalEmrtdApplet.java` (`selectByFid`), smoke test `SELECT EF.COM` / `SELECT EF.DG1`. |
+| Select MF and create demo DF/EF | `SELECT MF` (`3F00`) is supported. `CREATE FILE` (`INS=E0`) supports one DF (`FDB=0x38`) under MF and one transparent EF (`FDB=0x01`) under that DF. | `applet-src/EducationalEmrtdApplet.java` (`processCreateFile`, `createDynamicDf`, `createDynamicEf`), smoke test filesystem section. |
+| Write/read bytes in demo EF | `UPDATE BINARY` (`INS=D6`) writes to created EF; `READ BINARY` (`INS=B0`) reads back offsets/length with bounds checks. | `applet-src/EducationalEmrtdApplet.java` (`processUpdateBinary`, `processReadBinary`), smoke test payload round-trip checks. |
 | Read data from selected EF | `READ BINARY` (`INS=B0`) returns slices from current EF based on offset and Le. Supports offset-based reads used by host tools. | `applet-src/EducationalEmrtdApplet.java` (`processReadBinary`), smoke test read-slice checks. |
 | Status words for malformed/unsupported use | Uses `6700` for wrong length, `6A86` for wrong P1/P2 on unsupported SELECT mode, `6B00` for invalid offset, `6A82` for missing file, and standard `6D00` for unsupported INS. | Constants and throws in `applet-src/EducationalEmrtdApplet.java`. |
 | Deterministic sample payloads for EF content checks | EF.COM and EF.DG1 are static in-applet byte arrays; sample-data files mirror expected reads for smoke validation. | `applet-src/EducationalEmrtdApplet.java`; `sample-data/EF_COM.bin`; `sample-data/DG1.bin`; `tools/pcsc_smoke_read.py`. |

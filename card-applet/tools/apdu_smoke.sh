@@ -33,6 +33,7 @@ run_apdu_opensc() {
   local label="$1"
   local apdu="$2"
   local expect_sw="${3:-}"
+  local expect_data="${4:-}"
 
   # Fallback: opensc-tool (needs OPENSC_READER to reliably hit the PICC reader on ACR1552).
   local opensc_args=()
@@ -69,6 +70,10 @@ run_apdu_opensc() {
     echo "ERROR: expected SW=$expect_sw, got SW=$sw ($label)"
     return 1
   fi
+  if [[ -n "$expect_data" && "$data" != "$expect_data" ]]; then
+    echo "ERROR: expected DATA=$expect_data, got DATA=$data ($label)"
+    return 1
+  fi
 }
 
 run_apdus_gp() {
@@ -83,6 +88,14 @@ run_apdus_gp() {
     "00B0000020"
     "00B0002020"
     "00A4020C02DEAD"
+    "00A4000C023F00"
+    "00E000000983021100820138"
+    "00A4020C021100"
+    "00E000000C83021101820101800140"
+    "00A4020C021101"
+    "00D6000010465344454D4F5F57524954455F54455354"
+    "00B0000010"
+    "00B0001010"
   )
   LABELS=(
     "SELECT applet by AID"
@@ -92,6 +105,14 @@ run_apdus_gp() {
     "READ EF.DG1 bytes [0..31]"
     "READ EF.DG1 bytes [32..63]"
     "SELECT unknown FID (expect not found)"
+    "SELECT MF (3F00)"
+    "CREATE DF (1100)"
+    "SELECT DF (1100)"
+    "CREATE EF (1101, size 0x40)"
+    "SELECT EF (1101)"
+    "UPDATE BINARY EF(1101) bytes [0..15]"
+    "READ EF(1101) bytes [0..15]"
+    "READ EF(1101) bytes [16..31] (zero-filled)"
   )
   EXPECT_SW=(
     "9000"
@@ -101,6 +122,31 @@ run_apdus_gp() {
     "9000"
     "9000"
     "6A82"
+    "9000"
+    "9000"
+    "9000"
+    "9000"
+    "9000"
+    "9000"
+    "9000"
+    "9000"
+  )
+  EXPECT_DATA=(
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    "465344454D4F5F57524954455F54455354"
+    "00000000000000000000000000000000"
   )
 
   gp_args=(--debug --verbose "${GP_COMMON_OPTS[@]}")
@@ -108,7 +154,11 @@ run_apdus_gp() {
     gp_args+=(-a "$a")
   done
 
-  output="$($GP_BIN "${gp_args[@]}" 2>&1)"
+  if ! output="$($GP_BIN "${gp_args[@]}" 2>&1)"; then
+    echo "ERROR: gp APDU batch failed."
+    printf '%s\n' "$output"
+    return 1
+  fi
 
   # Build a table of: <APDU_HEX_NO_SPACES> <RESP_HEX_NO_SPACES>
   pairs="$(printf '%s\n' "$output" | awk '
@@ -126,6 +176,7 @@ run_apdus_gp() {
   for i in "${!APDUS[@]}"; do
     label="${LABELS[$i]}"
     expect="${EXPECT_SW[$i]}"
+    expect_data="${EXPECT_DATA[$i]}"
 
     # Use response order: gp prints A>>/A<< pairs in the same order as the -a arguments.
     resp="$(printf '%s\n' "${pair_lines[$i]}" | awk '{print $2}')"
@@ -142,6 +193,10 @@ run_apdus_gp() {
 
     if [[ -n "$expect" && "$sw" != "$expect" ]]; then
       echo "ERROR: expected SW=$expect, got SW=$sw ($label)"
+      return 1
+    fi
+    if [[ -n "$expect_data" && "$data" != "$expect_data" ]]; then
+      echo "ERROR: expected DATA=$expect_data, got DATA=$data ($label)"
       return 1
     fi
   done
@@ -162,4 +217,12 @@ run_apdu_opensc "SELECT EF.DG1 (0101)" "00A4020C020101" "9000"
 run_apdu_opensc "READ EF.DG1 bytes [0..31]" "00B0000020" "9000"
 run_apdu_opensc "READ EF.DG1 bytes [32..63]" "00B0002020" "9000"
 run_apdu_opensc "SELECT unknown FID (expect not found)" "00A4020C02DEAD" "6A82"
+run_apdu_opensc "SELECT MF (3F00)" "00A4000C023F00" "9000"
+run_apdu_opensc "CREATE DF (1100)" "00E000000983021100820138" "9000"
+run_apdu_opensc "SELECT DF (1100)" "00A4020C021100" "9000"
+run_apdu_opensc "CREATE EF (1101, size 0x40)" "00E000000C83021101820101800140" "9000"
+run_apdu_opensc "SELECT EF (1101)" "00A4020C021101" "9000"
+run_apdu_opensc "UPDATE BINARY EF(1101) bytes [0..15]" "00D6000010465344454D4F5F57524954455F54455354" "9000"
+run_apdu_opensc "READ EF(1101) bytes [0..15]" "00B0000010" "9000" "465344454D4F5F57524954455F54455354"
+run_apdu_opensc "READ EF(1101) bytes [16..31] (zero-filled)" "00B0001010" "9000" "00000000000000000000000000000000"
 echo "APDU smoke checks completed."
