@@ -192,7 +192,7 @@ Manual APDU examples (hex, spaces optional):
 - **Create DF (`FID=1100`)**
 
   ```text
-  00 E0 00 00 06 83 02 11 00 82 01 38
+  00 E0 00 00 07 83 02 11 00 82 01 38
   ```
 
   Expected status word: `9000` (requires MF selected).
@@ -200,7 +200,7 @@ Manual APDU examples (hex, spaces optional):
 - **Create EF (`FID=1101`, size=0x40)**
 
   ```text
-  00 E0 00 00 09 83 02 11 01 82 01 01 80 01 40
+  00 E0 00 00 0A 83 02 11 01 82 01 01 80 01 40
   ```
 
   Expected status word: `9000` (requires DF selected).
