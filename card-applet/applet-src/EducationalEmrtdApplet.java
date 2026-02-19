@@ -78,6 +78,14 @@ public final class EducationalEmrtdApplet extends Applet {
     }
 
     @Override
+    public boolean select() {
+        // Reset filesystem cursor whenever the applet is selected by the JCRE.
+        currentDf = fileSystem.getRoot();
+        selectedFile = currentDf;
+        return true;
+    }
+
+    @Override
     public void process(APDU apdu) {
         if (selectingApplet()) {
             return;
