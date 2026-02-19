@@ -72,6 +72,16 @@ Run from repository root unless noted.
   ./card-applet/tools/apdu_smoke.sh
   ```
 
+- **Provision DG2 image (chunked UPDATE BINARY)**
+
+  ```bash
+  # Uses sample-data/DG2/fikri\ jamal.jpeg by default
+  ./card-applet/tools/load_dg2.sh
+
+  # Or provide your own file path
+  ./card-applet/tools/load_dg2.sh /path/to/photo.jpg
+  ```
+
 ## Installing To A Physical Card
 
 1. Build a CAP:
@@ -102,7 +112,13 @@ Run from repository root unless noted.
    ./card-applet/tools/apdu_smoke.sh
    ```
 
-4. Uninstall (optional):
+4. Optional: load DG2 placeholder image into EF `0102`:
+
+   ```bash
+   ./card-applet/tools/load_dg2.sh
+   ```
+
+5. Uninstall (optional):
 
    ```bash
    ./card-applet/tools/uninstall.sh
@@ -117,6 +133,7 @@ Run from repository root unless noted.
 - `UPDATE BINARY` (`00 D6 ...`) for writes to the created EF.
 - `READ BINARY` offset-based reads (`00 B0 <offset_hi> <offset_lo> <Le>`).
 - `EF.COM` and `DG1` are available for smoke/demo flows.
+- Dynamic transparent EF size supports DG2-style demo payloads up to `24576` bytes.
 
 ### Filesystem demo scope
 

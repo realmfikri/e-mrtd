@@ -6,6 +6,7 @@ import javacard.framework.Applet;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
+import javacard.framework.SystemException;
 import javacard.framework.Util;
 
 /**
@@ -41,10 +42,11 @@ public final class EducationalEmrtdApplet extends Applet {
     // Flip to true to demonstrate 6982 on DG1 reads when access control is not implemented.
     private static final boolean ENFORCE_DG1_READ_POLICY = false;
 
-    // Fixed small limits keep memory usage explicit for Java Card-style targets.
+    // Fixed node limits keep filesystem behavior explicit for this educational applet.
     private static final byte MAX_FS_NODES = (byte) 8;
     private static final byte MAX_CHILDREN_PER_DF = (byte) 6;
-    private static final short MAX_DYNAMIC_EF_SIZE = (short) 256;
+    // Allow DG2-scale demo payloads (for example ~24KB JPEG) while still bounding EF size.
+    private static final short MAX_DYNAMIC_EF_SIZE = (short) 24576;
     private static final byte FDB_TRANSPARENT_EF = (byte) 0x01;
     private static final byte FDB_DF = (byte) 0x38;
 
@@ -455,7 +457,13 @@ public final class EducationalEmrtdApplet extends Applet {
                 ISOException.throwIt(SW_FILE_FULL);
             }
 
-            byte[] data = new byte[size];
+            byte[] data;
+            try {
+                data = new byte[size];
+            } catch (SystemException e) {
+                ISOException.throwIt(SW_FILE_FULL);
+                return null;
+            }
             EfNode created = new EfNode(fid, parent, data, size, size, true);
             addChild(parent, created);
             return created;
