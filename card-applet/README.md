@@ -40,6 +40,10 @@ make -C card-applet clean all JC_TARGET=3.0.5
 ./card-applet/tools/apdu_smoke.sh
 ```
 
+`apdu_smoke.sh` on `passport` profile is expected to show:
+- `SELECT`/`PUT DATA`/`GET CHALLENGE` as `9000`
+- direct `READ BINARY` as `6982` (normal before BAC secure messaging)
+
 When switching between `educational` and `passport` profiles, keep `UNINSTALL_ALL_PROFILES=1` (default) so stale packages from the other profile are also removed.
 
 Default personalization values in `personalize_passport.sh`:
@@ -66,6 +70,8 @@ Optional DG2 write:
 ./card-applet/tools/load_dg2.sh card-applet/sample-data/passport/EF.DG2.bin
 ```
 
+For `passport`, the DG2 loader verifies write completion and expects final plain `READ BINARY` to be blocked with `6982` until BAC is performed by the reader stack.
+
 ## Test with existing reader UI
 
 Use the existing app reader flow (no reader code changes required):
@@ -84,6 +90,22 @@ In the UI:
 3. Click **Read passport**.
 
 If card transport fails before APDU (`SCARD_W_UNPOWERED_CARD`), re-seat the card/tag and retry with stable reader contact.
+
+## Troubleshooting install
+
+- If install reports `INSTALL [for load] failed: 0x6985`, run uninstall first (the script now tries CAP-driven uninstall automatically):
+
+```bash
+UNINSTALL_ALL_PROFILES=1 ./card-applet/tools/uninstall.sh
+./card-applet/tools/install.sh
+```
+
+- If you still see reader sharing errors (`SCARD_E_SHARING_VIOLATION`), close other apps using PC/SC (including running JavaFX reader windows) and retry.
+- Logs are written under `card-applet/tools/out/`:
+  - `gp_uninstall_*.log`
+  - `gp_pre_install_*.log`
+  - `gp_install_*.log`
+  - `gp_post_install_*.log`
 
 ## Educational profile (legacy smoke flow)
 

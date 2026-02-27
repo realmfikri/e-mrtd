@@ -180,8 +180,6 @@ public class PassportApplet extends Applet implements ISO7816 {
 
         randomData = RandomData.getInstance(RandomData.ALG_PSEUDO_RANDOM);
 
-        certificate = new CVCertificate();
-
         keyStore = new KeyStore(mode);
         switch (mode) {
         case PassportCrypto.CREF_MODE:
@@ -220,7 +218,23 @@ public class PassportApplet extends Applet implements ISO7816 {
      * @see javacard.framework.Applet#install(byte[], byte, byte)
      */
     public static void install(byte[] buffer, short offset, byte length) {
-        (new PassportApplet(PassportCrypto.JCOP41_MODE)).register();
+        // Use the most broadly compatible crypto profile for real cards.
+        // JCOP41/PERFECTWORLD require EC F2M key support at install time, which
+        // is absent on a number of cards and causes INSTALL to fail with 6F00.
+        (new PassportApplet(PassportCrypto.CREF_MODE)).register();
+    }
+
+    private static boolean ensureCertificate() {
+        if (certificate != null) {
+            return true;
+        }
+        try {
+            certificate = new CVCertificate();
+            return true;
+        } catch (Exception e) {
+            certificate = null;
+            return false;
+        }
     }
 
     /**
@@ -353,6 +367,9 @@ public class PassportApplet extends Applet implements ISO7816 {
         if (!hasChipAuthenticated() || hasTerminalAuthenticated()) {
             ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
         }
+        if (!ensureCertificate()) {
+            ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+        }
         if (buffer[OFFSET_P1] != (byte) 0x00
                 && buffer[OFFSET_P2] != P2_VERIFYCERT) {
             ISOException.throwIt(SW_INCORRECT_P1P2);
@@ -393,6 +410,9 @@ public class PassportApplet extends Applet implements ISO7816 {
         }
         if (!hasMutuallyAuthenticated() || hasTerminalAuthenticated()) {
             ISOException.throwIt(SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+        if (!ensureCertificate()) {
+            ISOException.throwIt(SW_INS_NOT_SUPPORTED);
         }
         if (p1 == P1_SETFORCOMPUTATION && p2 == P2_KAT) {
 
@@ -473,6 +493,9 @@ public class PassportApplet extends Applet implements ISO7816 {
         if (p1 == 0xde && p2 == 0xad) {
             persistentState |= LOCKED;
         } else if (p1 == 0 && p2 == PRIVMODULUS_TAG) {
+            if (keyStore.rsaPrivateKey == null) {
+                ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+            }
             buffer_p = BERTLVScanner.readTag(buffer, buffer_p); // tag ==
             // PRIVMODULUS_TAG
             buffer_p = BERTLVScanner.readLength(buffer, buffer_p); // length ==
@@ -490,6 +513,9 @@ public class PassportApplet extends Applet implements ISO7816 {
             keyStore.rsaPrivateKey.setModulus(buffer, modOffset, modLength);
             persistentState |= HAS_MODULUS;
         } else if (p1 == 0 && p2 == PRIVEXPONENT_TAG) {
+            if (keyStore.rsaPrivateKey == null) {
+                ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+            }
             buffer_p = BERTLVScanner.readTag(buffer, buffer_p); // tag ==
             // PRIVEXP_TAG
             buffer_p = BERTLVScanner.readLength(buffer, buffer_p); // length ==
@@ -543,6 +569,9 @@ public class PassportApplet extends Applet implements ISO7816 {
                     encKey_p);
             persistentState |= HAS_MUTUALAUTHENTICATION_KEYS;
         } else if (p1 == 0 && p2 == ECPRIVATEKEY_TAG) {
+            if (keyStore.ecPrivateKey == null || keyStore.ecPublicKey == null) {
+                ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+            }
             short finish = (short) (buffer_p + lc);
             while (buffer_p < finish) {
                 buffer_p = BERTLVScanner.readTag(buffer, buffer_p);
@@ -605,6 +634,9 @@ public class PassportApplet extends Applet implements ISO7816 {
             ISOException.throwIt(SW_WRONG_DATA);
         }
     } else if (p2 == CVCERTIFICATE_TAG) {
+        if (!ensureCertificate()) {
+            ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+        }
         if ((byte) (persistentState & HAS_CVCERTIFICATE) == HAS_CVCERTIFICATE) {
             // We already have the certificate initialized
             ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
@@ -628,6 +660,9 @@ public class PassportApplet extends Applet implements ISO7816 {
     private short processInternalAuthenticate(APDU apdu, boolean protectedApdu) {
         if (!hasInternalAuthenticationKeys() || !hasMutuallyAuthenticated()) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+        if (crypto.rsaCiph == null || keyStore.rsaPrivateKey == null) {
+            ISOException.throwIt(SW_INS_NOT_SUPPORTED);
         }
 
         short buffer_p = (short) (OFFSET_CDATA & 0xff);
@@ -702,6 +737,9 @@ public class PassportApplet extends Applet implements ISO7816 {
      */
     private short processGetChallenge(APDU apdu, boolean protectedApdu, short le) {
         if (protectedApdu) {
+            if (!ensureCertificate()) {
+                ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+            }
             // we're doing TA
             if (!hasChipAuthenticated()
                     || certificate.cert1HolderReference[0] == (byte)0
@@ -746,6 +784,9 @@ public class PassportApplet extends Applet implements ISO7816 {
      */
     private short processMutualAuthenticate(APDU apdu, boolean protectedApdu) {
         if (protectedApdu) {
+            if (!ensureCertificate()) {
+                ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+            }
             // we're doing EAC
             if (!hasChipAuthenticated() || !isChallenged()
                     || certificate.currentCertSubjectId[0] == (byte)0
@@ -1015,6 +1056,9 @@ public class PassportApplet extends Applet implements ISO7816 {
                 buffer[(short) (OFFSET_CDATA + 5)]);
 
         if(fid == FileSystem.EF_CVCA_FID) {
+           if (!ensureCertificate()) {
+               ISOException.throwIt(SW_INS_NOT_SUPPORTED);
+           }
            fileSystem.createFile(fid, size, certificate);
         }else{
            fileSystem.createFile(fid, size);

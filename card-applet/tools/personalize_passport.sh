@@ -173,18 +173,33 @@ extract_sw_for_apdu() {
   printf '%s' "$resp"
 }
 
+normalize_apdu() {
+  local apdu="$1"
+  if (( ${#apdu} > 10 )); then
+    printf '%s00' "$apdu"
+  else
+    printf '%s' "$apdu"
+  fi
+}
+
 run_gp_apdu() {
   local label="$1"
   local apdu="$2"
   local expect_sw="${3:-9000}"
-  local tx="$apdu"
-  local output sw
+  local tx output sw
+  local -a gp_cmd
 
-  if (( ${#tx} > 10 )); then
-    tx="${tx}00"
+  tx="$(normalize_apdu "$apdu")"
+  gp_cmd=("$GP_BIN" --debug --verbose "${GP_COMMON_OPTS[@]}")
+  if [[ "$tx" != "$SELECT_APPLET_TX" ]]; then
+    gp_cmd+=(-a "$SELECT_APPLET_TX")
+    if [[ -n "$CURRENT_EF" && "$apdu" =~ ^00(D6|B0) ]]; then
+      gp_cmd+=(-a "00A4020C02${CURRENT_EF}00")
+    fi
   fi
+  gp_cmd+=(-a "$tx")
 
-  if ! output="$("$GP_BIN" --debug --verbose "${GP_COMMON_OPTS[@]}" -a "$tx" 2>&1)"; then
+  if ! output="$("${gp_cmd[@]}" 2>&1)"; then
     echo "ERROR: APDU command failed: $label" >&2
     echo "$output" >&2
     exit 1
@@ -201,6 +216,14 @@ run_gp_apdu() {
   if [[ "$sw" != "$expect_sw" ]]; then
     echo "ERROR: expected SW=$expect_sw, got SW=$sw ($label)" >&2
     exit 1
+  fi
+
+  if [[ "$sw" == "9000" ]]; then
+    if [[ "$apdu" =~ ^00A40400 ]]; then
+      CURRENT_EF=""
+    elif [[ "$apdu" =~ ^00A4020C02([0-9A-Fa-f]{4})$ ]]; then
+      CURRENT_EF="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')"
+    fi
   fi
 }
 
@@ -259,7 +282,10 @@ mrz_data="62$(printf '%02X' $(( ${#mrz_inner} / 2 )))${mrz_inner}"
 mrz_lc="$(printf '%02X' $(( ${#mrz_data} / 2 )))"
 
 aid_lc="$(printf '%02X' $(( ${#APPLET_AID_HEX} / 2 )))"
-run_gp_apdu "SELECT applet AID ${APPLET_AID_HEX}" "00A40400${aid_lc}${APPLET_AID_HEX}" "9000"
+SELECT_APPLET_APDU="00A40400${aid_lc}${APPLET_AID_HEX}"
+SELECT_APPLET_TX="$(normalize_apdu "$SELECT_APPLET_APDU")"
+CURRENT_EF=""
+run_gp_apdu "SELECT applet AID ${APPLET_AID_HEX}" "$SELECT_APPLET_APDU" "9000"
 
 com_size="$(wc -c < "$COM_PATH" | tr -d ' ')"
 dg1_size="$(wc -c < "$DG1_PATH" | tr -d ' ')"

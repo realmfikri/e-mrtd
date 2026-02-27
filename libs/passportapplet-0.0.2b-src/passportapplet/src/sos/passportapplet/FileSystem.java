@@ -174,11 +174,18 @@ public class FileSystem {
     }
 
     private static short getFileIndex(short fid) throws ISOException {
-        if ((fid == EF_DG3_FID && !PassportApplet.certificate.isDG3Accessible())
-                || (fid == EF_DG4_FID && !PassportApplet.certificate
-                        .isDG4Accessible())) {
-            ISOException
-                    .throwIt(PassportApplet.SW_SECURITY_STATUS_NOT_SATISFIED);
+        if (fid == EF_DG3_FID) {
+            if (PassportApplet.certificate == null
+                    || !PassportApplet.certificate.isDG3Accessible()) {
+                ISOException
+                        .throwIt(PassportApplet.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
+        } else if (fid == EF_DG4_FID) {
+            if (PassportApplet.certificate == null
+                    || !PassportApplet.certificate.isDG4Accessible()) {
+                ISOException
+                        .throwIt(PassportApplet.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
         }
         switch (fid) {
         case EF_DG1_FID:

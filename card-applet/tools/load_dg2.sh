@@ -106,23 +106,37 @@ while (( offset < filesize )); do
 
   off_hex="$(printf '%04X' "$offset")"
   lc_hex="$(printf '%02X' "$take")"
-  data_hex="$(dd if="$DG2_PATH" bs=1 skip="$offset" count="$take" status=none | xxd -p -c "$take" | tr -d '\n')"
+  data_hex="$(dd if="$DG2_PATH" bs=1 skip="$offset" count="$take" status=none | xxd -p -c "$take" | tr -d '\n' | tr '[:lower:]' '[:upper:]')"
 
   add_apdu "UPDATE BINARY offset=${offset} len=${take}" "00D6${off_hex}${lc_hex}${data_hex}" "9000"
   offset=$(( offset + take ))
 done
 
-# Verify JPEG SOI marker.
-add_apdu "READ BINARY verify head (16 bytes)" "00B0000010" "9000"
+# Verify head (passport profile requires BAC before READ, so expect 6982 there).
+if [[ "${APPLET_PROFILE}" == "passport" ]]; then
+  add_apdu "READ BINARY verify head (16 bytes)" "00B0000010" "6982"
+else
+  add_apdu "READ BINARY verify head (16 bytes)" "00B0000010" "9000"
+fi
 
 run_gp_apdu() {
   local label="$1"
   local apdu="$2"
   local expected_csv="$3"
   local tx output resp sw data
+  local -a gp_cmd
 
-  tx="$(gp_apdu "$apdu")"
-  if ! output="$($GP_BIN --debug --verbose "${GP_COMMON_OPTS[@]}" -a "$tx" 2>&1)"; then
+  tx="$(gp_apdu "$apdu" | tr '[:lower:]' '[:upper:]')"
+  gp_cmd=("$GP_BIN" --debug --verbose "${GP_COMMON_OPTS[@]}")
+  if [[ "$tx" != "$SELECT_APPLET_TX" ]]; then
+    gp_cmd+=(-a "$SELECT_APPLET_TX")
+    if [[ -n "$CURRENT_EF" && "$apdu" =~ ^00(D6|B0) ]]; then
+      gp_cmd+=(-a "00A4020C02${CURRENT_EF}00")
+    fi
+  fi
+  gp_cmd+=(-a "$tx")
+
+  if ! output="$("${gp_cmd[@]}" 2>&1)"; then
     echo "ERROR: gp APDU failed for: $label"
     printf '%s\n' "$output"
     exit 1
@@ -179,7 +193,18 @@ run_gp_apdu() {
     echo "[dg2] DATA: ${data:-<empty>}"
     exit 1
   fi
+
+  if [[ "$sw" == "9000" ]]; then
+    if [[ "$apdu" =~ ^00A40400 ]]; then
+      CURRENT_EF=""
+    elif [[ "$apdu" =~ ^00A4020C02([0-9A-Fa-f]{4})$ ]]; then
+      CURRENT_EF="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')"
+    fi
+  fi
 }
+
+SELECT_APPLET_TX="$(gp_apdu "00A40400${aid_len_hex}${APPLET_AID_HEX}")"
+CURRENT_EF=""
 
 for i in "${!APDUS[@]}"; do
   run_gp_apdu "${LABELS[$i]}" "${APDUS[$i]}" "${EXPECT_SW[$i]}"

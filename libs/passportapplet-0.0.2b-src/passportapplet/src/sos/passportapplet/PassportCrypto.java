@@ -77,10 +77,22 @@ public class PassportCrypto {
         init();
         
         shaDigest = MessageDigest.getInstance(MessageDigest.ALG_SHA, false);
-        rsaSig = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
-        rsaCiph = Cipher.getInstance(Cipher.ALG_RSA_NOPAD, false);
-        keyAgreement = KeyAgreement.getInstance(KeyAgreement.ALG_EC_SVDP_DH,
-                false);
+        try {
+            rsaSig = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
+        } catch (CryptoException e) {
+            rsaSig = null;
+        }
+        try {
+            rsaCiph = Cipher.getInstance(Cipher.ALG_RSA_NOPAD, false);
+        } catch (CryptoException e) {
+            rsaCiph = null;
+        }
+        try {
+            keyAgreement = KeyAgreement.getInstance(KeyAgreement.ALG_EC_SVDP_DH,
+                    false);
+        } catch (CryptoException e) {
+            keyAgreement = null;
+        }
         eacChangeKeys = JCSystem.makeTransientBooleanArray((short) 1,
                 JCSystem.CLEAR_ON_DESELECT);
 
@@ -572,6 +584,10 @@ public class PassportCrypto {
      * @return true when authentication successful
      */
     public boolean authenticateChip(byte[] pubData, short offset, short length) {
+        if (keyAgreement == null || keyStore.ecPublicKey == null
+                || keyStore.ecPrivateKey == null) {
+            return false;
+        }
         try {
             // Verify public key first. i.e. see if the data is correct and
             // makes up a valid
@@ -613,6 +629,9 @@ public class PassportCrypto {
 
     boolean eacVerifySignature(RSAPublicKey key, byte[] rnd, 
             byte[] docNr, byte[] buffer, short offset, short length) {
+        if (rsaSig == null || keyStore.ecPublicKey == null) {
+            return false;
+        }
         short x_offset = (short)(offset+length);
         keyStore.ecPublicKey.getW(buffer, x_offset++);
         rsaSig.init(key, Signature.MODE_VERIFY);

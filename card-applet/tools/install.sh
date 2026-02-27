@@ -30,17 +30,53 @@ attempt_gp_install() {
   gp "${GP_COMMON_OPTS[@]}" -install "$CAP_PATH"
 }
 
+cleanup_profile_aids() {
+  local aid
+  gp "${GP_COMMON_OPTS[@]}" -uninstall "$CAP_PATH" >/dev/null 2>&1 || true
+
+  local applet_aids=("$GP_APPLET_AID" "A000000247100001" "A0000002471001")
+  local package_aids=("$GP_PACKAGE_AID" "A0000002471000" "A00000024710")
+
+  for aid in "${applet_aids[@]}"; do
+    gp "${GP_COMMON_OPTS[@]}" -delete "$aid" >/dev/null 2>&1 || true
+  done
+  for aid in "${package_aids[@]}"; do
+    gp "${GP_COMMON_OPTS[@]}" -delete "$aid" >/dev/null 2>&1 || true
+  done
+}
+
 echo "[install] Capturing pre-install card listing -> $PRE_LOG"
 if ! gp "${GP_COMMON_OPTS[@]}" -l >"$PRE_LOG" 2>&1; then
   echo "[install] Warning: pre-install listing failed (see $PRE_LOG)"
 fi
 
 ok=0
+failure_sw=""
+failure_phase=""
+: >"$INSTALL_LOG"
 for i in $(seq 1 "$GP_RETRIES"); do
-  if attempt_gp_install "$i" >"$INSTALL_LOG" 2>&1; then
+  ATTEMPT_LOG="$OUT_DIR/gp_install_${STAMP}_attempt${i}.log"
+  if attempt_gp_install "$i" >"$ATTEMPT_LOG" 2>&1; then
+    cp "$ATTEMPT_LOG" "$INSTALL_LOG"
     ok=1
     break
   fi
+  {
+    echo "[install] Attempt ${i} failed log ($ATTEMPT_LOG):"
+    cat "$ATTEMPT_LOG"
+    echo
+  } >>"$INSTALL_LOG"
+
+  if grep -q "INSTALL \[for load\] failed: 0x6985" "$ATTEMPT_LOG"; then
+    failure_sw="6985"
+    failure_phase="install-for-load"
+    echo "[install] Detected stale/blocked package state (0x6985); cleaning known profile AIDs before retry."
+    cleanup_profile_aids
+  elif grep -q "INSTALL \[for install and make selectable\] failed: 0x6F00" "$ATTEMPT_LOG"; then
+    failure_sw="6F00"
+    failure_phase="make-selectable"
+  fi
+
   echo "[install] Install failed on attempt $i."
   if (( i < GP_RETRIES )); then
     echo "[install] Retrying after ${GP_RETRY_SLEEP}s..."
@@ -53,6 +89,10 @@ if (( ok == 0 )); then
   echo "[install] Guidance: keep card stable on reader and try a smaller GP_NFC_BLOCK_SIZE (for example 96 or 64)."
   echo "[install] Guidance: clear previously installed profile packages with:"
   echo "          UNINSTALL_ALL_PROFILES=1 ./card-applet/tools/uninstall.sh"
+  if [[ "$failure_sw" == "6F00" && "$failure_phase" == "make-selectable" ]]; then
+    echo "[install] Guidance: applet constructor failed during make-selectable (0x6F00)."
+    echo "[install]           This typically indicates on-card crypto/memory incompatibility in install-time initialization."
+  fi
   echo "[install] Install log: $INSTALL_LOG"
   exit 1
 fi

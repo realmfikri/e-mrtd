@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUT_DIR="$SCRIPT_DIR/out"
 mkdir -p "$OUT_DIR"
 
@@ -13,6 +14,29 @@ STAMP="$(date +%Y%m%d_%H%M%S)"
 REMOVE_LOG="$OUT_DIR/gp_uninstall_${STAMP}.log"
 POST_LOG="$OUT_DIR/gp_post_uninstall_${STAMP}.log"
 UNINSTALL_ALL_PROFILES="${UNINSTALL_ALL_PROFILES:-1}"
+CAP_PATH="$REPO_ROOT/$GP_CAP_REL"
+
+try_uninstall_cap() {
+  local output
+  if [[ ! -f "$CAP_PATH" ]]; then
+    return 0
+  fi
+
+  echo "[uninstall] Attempting CAP-driven uninstall: $CAP_PATH"
+  if output="$(gp "${GP_COMMON_OPTS[@]}" -uninstall "$CAP_PATH" 2>&1)"; then
+    printf '%s\n' "$output"
+    return 0
+  fi
+
+  printf '%s\n' "$output"
+  if printf '%s\n' "$output" | grep -Eqi "not present on card|6a88"; then
+    echo "[uninstall] CAP package not present; continuing."
+    return 0
+  fi
+
+  echo "[uninstall] Warning: CAP-driven uninstall failed; falling back to explicit AID deletes."
+  return 0
+}
 
 delete_aid() {
   local label="$1"
@@ -26,7 +50,12 @@ delete_aid() {
   fi
 
   printf '%s\n' "$output"
-  if printf '%s\n' "$output" | rg -qi "not present on card|6a88"; then
+  if command -v rg >/dev/null 2>&1; then
+    if printf '%s\n' "$output" | rg -qi "not present on card|6a88"; then
+      echo "[uninstall] ${label} AID not present; continuing."
+      return 0
+    fi
+  elif printf '%s\n' "$output" | grep -Eqi "not present on card|6a88"; then
     echo "[uninstall] ${label} AID not present; continuing."
     return 0
   fi
@@ -50,6 +79,8 @@ collect_unique_aids() {
 }
 
 {
+  try_uninstall_cap
+
   if [[ "$UNINSTALL_ALL_PROFILES" == "1" ]]; then
     collect_unique_aids APPLET_AIDS \
       "$GP_APPLET_AID" \

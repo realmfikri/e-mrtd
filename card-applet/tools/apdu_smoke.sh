@@ -142,29 +142,37 @@ run_apdus_gp() {
   if [[ "${APPLET_PROFILE}" == "passport" ]]; then
     APDUS=(
       "00A4040007${APPLET_AID_HEX}"
-      "00E000000663040020EFFF"
-      "00A4020C02EFFF"
-      "00D6000009534D4F4B455F444754"
+      "00A4020C02011E"
+      "00B0000020"
+      "00A4020C020101"
+      "00B0000020"
       "00DA006220621E5F1F09433458394C3251373C5F18063033303231315F1906323830323131"
       "0084000008"
+      "00A4020C02DEAD"
     )
     LABELS=(
       "SELECT applet by AID"
-      "CREATE EF (EFFF, size 0x20)"
-      "SELECT EF (EFFF)"
-      "UPDATE BINARY EF(EFFF) bytes [0..8]"
+      "SELECT EF.COM (011E)"
+      "READ EF.COM first 32 bytes"
+      "SELECT EF.DG1 (0101)"
+      "READ EF.DG1 first 32 bytes"
       "PUT DATA MRZ seed (p1=00 p2=62)"
       "GET CHALLENGE (8 bytes)"
+      "SELECT unknown FID (expect not found)"
     )
     EXPECT_SW=(
       "9000"
       "9000"
+      "6982"
+      "9000"
+      "6982"
       "9000"
       "9000"
-      "9000"
-      "9000"
+      "6A82"
     )
     EXPECT_DATA=(
+      ""
+      ""
       ""
       ""
       ""
@@ -244,8 +252,84 @@ run_apdus_gp() {
     )
   fi
 
+  local -a txs gp_cmd pairs
+  local tx output resp sw data pair pair_cmd pair_resp pair_idx
+
+  gp_cmd=("$GP_BIN" --debug --verbose "${GP_COMMON_OPTS[@]}")
+  txs=()
   for i in "${!APDUS[@]}"; do
-    run_apdu_gp "${LABELS[$i]}" "${APDUS[$i]}" "${EXPECT_SW[$i]}" "${EXPECT_DATA[$i]}"
+    tx="${APDUS[$i]}"
+    if (( ${#tx} > 10 )); then
+      tx="${tx}00"
+    fi
+    txs+=("$tx")
+    gp_cmd+=(-a "$tx")
+  done
+
+  if ! output="$("${gp_cmd[@]}" 2>&1)"; then
+    echo "ERROR: gp APDU batch failed"
+    printf '%s\n' "$output"
+    return 1
+  fi
+
+  mapfile -t pairs < <(printf '%s\n' "$output" | awk '
+    $1=="A>>" {
+      cmd=$0
+      sub(/^.*[)] /, "", cmd)
+      gsub(/ /, "", cmd)
+      cur_cmd=cmd
+      next
+    }
+    $1=="A<<" {
+      r=$0
+      sub(/^.*[)] /, "", r)
+      gsub(/ /, "", r)
+      if (length(cur_cmd) > 0) {
+        print cur_cmd "|" r
+        cur_cmd=""
+      }
+      next
+    }
+  ')
+
+  pair_idx=0
+  for i in "${!APDUS[@]}"; do
+    tx="${txs[$i]}"
+    resp=""
+    while (( pair_idx < ${#pairs[@]} )); do
+      pair="${pairs[$pair_idx]}"
+      pair_idx=$((pair_idx + 1))
+      pair_cmd="${pair%%|*}"
+      pair_resp="${pair#*|}"
+      if [[ "$pair_cmd" == "$tx" ]]; then
+        resp="$pair_resp"
+        break
+      fi
+    done
+
+    if [[ -z "$resp" ]]; then
+      echo "ERROR: unable to parse response for APDU: ${LABELS[$i]} ($tx)"
+      printf '%s\n' "$output"
+      return 1
+    fi
+    if (( ${#resp} < 4 )); then
+      echo "ERROR: response too short for APDU: ${LABELS[$i]} ($tx)"
+      echo "RESP : $resp"
+      return 1
+    fi
+
+    sw="${resp: -4}"
+    data="${resp:0:${#resp}-4}"
+    print_result "${LABELS[$i]}" "${APDUS[$i]}" "$data" "$sw"
+
+    if [[ -n "${EXPECT_SW[$i]}" && "$sw" != "${EXPECT_SW[$i]}" ]]; then
+      echo "ERROR: expected SW=${EXPECT_SW[$i]}, got SW=$sw (${LABELS[$i]})"
+      return 1
+    fi
+    if [[ -n "${EXPECT_DATA[$i]}" && "$data" != "${EXPECT_DATA[$i]}" ]]; then
+      echo "ERROR: expected DATA=${EXPECT_DATA[$i]}, got DATA=$data (${LABELS[$i]})"
+      return 1
+    fi
   done
 
   echo "APDU smoke checks completed."
@@ -259,11 +343,13 @@ fi
 # No gp: try opensc-tool sequentially (state may not persist depending on reader/runtime).
 if [[ "${APPLET_PROFILE}" == "passport" ]]; then
   run_apdu_opensc "SELECT applet by AID" "00A4040007${APPLET_AID_HEX}" "9000"
-  run_apdu_opensc "CREATE EF (EFFF, size 0x20)" "00E000000663040020EFFF" "9000"
-  run_apdu_opensc "SELECT EF (EFFF)" "00A4020C02EFFF" "9000"
-  run_apdu_opensc "UPDATE BINARY EF(EFFF) bytes [0..8]" "00D6000009534D4F4B455F444754" "9000"
+  run_apdu_opensc "SELECT EF.COM (011E)" "00A4020C02011E" "9000"
+  run_apdu_opensc "READ EF.COM first 32 bytes" "00B0000020" "6982"
+  run_apdu_opensc "SELECT EF.DG1 (0101)" "00A4020C020101" "9000"
+  run_apdu_opensc "READ EF.DG1 first 32 bytes" "00B0000020" "6982"
   run_apdu_opensc "PUT DATA MRZ seed (p1=00 p2=62)" "00DA006220621E5F1F09433458394C3251373C5F18063033303231315F1906323830323131" "9000"
   run_apdu_opensc "GET CHALLENGE (8 bytes)" "0084000008" "9000"
+  run_apdu_opensc "SELECT unknown FID (expect not found)" "00A4020C02DEAD" "6A82"
 else
   run_apdu_opensc "SELECT applet by AID" "00A4040008${APPLET_AID_HEX}" "9000"
   run_apdu_opensc "SELECT EF.COM (011E)" "00A4020C02011E" "9000"
