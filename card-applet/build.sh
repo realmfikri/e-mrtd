@@ -18,6 +18,9 @@ if [[ -z "${JCKIT:-}" ]]; then
   exit 1
 fi
 
+export APPLET_PROFILE="${APPLET_PROFILE:-passport}"
+echo "INFO: building card-applet profile=${APPLET_PROFILE}"
+
 make -C "${SCRIPT_DIR}" clean all
 
 CAP_PATH="${SCRIPT_DIR}/build/applet.cap"

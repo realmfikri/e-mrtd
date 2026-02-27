@@ -1,17 +1,34 @@
 SHELL := /bin/bash
 
+# Applet profile:
+# - passport: BAC-capable applet intended for the existing PassportService/JMRTD reader flow
+# - educational: minimal demo applet with plaintext READ BINARY smoke flow
+APPLET_PROFILE ?= passport
+
 # Java Card build settings (override via environment if needed)
+ifeq ($(APPLET_PROFILE),passport)
+PACKAGE_NAME ?= sos.passportapplet
+APPLET_CLASS ?= PassportApplet
+PACKAGE_AID ?= 0xA0:0x00:0x00:0x02:0x47:0x10
+APPLET_AID ?= 0xA0:0x00:0x00:0x02:0x47:0x10:0x01
+SRC_DIR ?= ../libs/passportapplet-0.0.2b-src/passportapplet/src
+APPLET_ENTRY ?= $(SRC_DIR)/sos/passportapplet/PassportApplet.java
+else ifeq ($(APPLET_PROFILE),educational)
 PACKAGE_NAME ?= cardapplet
 APPLET_CLASS ?= EducationalEmrtdApplet
 PACKAGE_AID ?= 0xA0:0x00:0x00:0x02:0x47:0x10:0x00
 APPLET_AID ?= 0xA0:0x00:0x00:0x02:0x47:0x10:0x00:0x01
+SRC_DIR ?= applet-src
+APPLET_ENTRY ?= $(SRC_DIR)/EducationalEmrtdApplet.java
+else
+$(error Unsupported APPLET_PROFILE '$(APPLET_PROFILE)'. Use 'passport' or 'educational'.)
+endif
+
 APPLET_VERSION ?= 1.0
 JAVAC_RELEASE ?= 8
 
-SRC_DIR := applet-src
 BUILD_DIR := build
 CLASS_DIR := $(BUILD_DIR)/classes
-CAP_TMP := $(BUILD_DIR)/$(PACKAGE_NAME)/javacard/$(PACKAGE_NAME).cap
 CAP_OUT := $(BUILD_DIR)/applet.cap
 
 SAMPLE_DIR := sample-data
@@ -63,8 +80,10 @@ all: prepare-sample-data $(CAP_OUT)
 check-env:
 	@test -n "$(JAVA_HOME)" || { echo "ERROR: JAVA_HOME must be set"; exit 1; }
 	@test -n "$(JCKIT)" || { echo "ERROR: JCKIT must be set"; exit 1; }
+	@test -n "$(APPLET_PROFILE)" || { echo "ERROR: APPLET_PROFILE must be set"; exit 1; }
 	@test -x "$(JAVAC)" || { echo "ERROR: javac not found at $(JAVAC)"; exit 1; }
 	@test -x "$(JAVA)" || { echo "ERROR: java not found at $(JAVA)"; exit 1; }
+	@test -f "$(APPLET_ENTRY)" || { echo "ERROR: applet entry source not found at $(APPLET_ENTRY)"; exit 1; }
 	@test -n "$(JC_API)" || { echo "ERROR: unable to find Java Card API jar under $(JCKIT)/lib (expected api.jar or api_classic-*.jar)"; exit 1; }
 	@test -f "$(JC_API)" || { echo "ERROR: Java Card API jar not found at $(JC_API)"; exit 1; }
 	@if [ -x "$(JC_CONVERTER_SH)" ]; then \
@@ -105,7 +124,7 @@ compile: check-env | $(CLASS_DIR)
 		-classpath "$(JC_API):$(SRC_DIR)" \
 		-d "$(CLASS_DIR)" \
 		-sourcepath "$(SRC_DIR)" \
-		$(SRC_DIR)/*.java
+		"$(APPLET_ENTRY)"
 
 prepare-jckit-exports: check-env
 	@if [ -d "$(JC_EXPORTS)" ]; then \
@@ -142,8 +161,10 @@ else
 endif
 
 $(CAP_OUT): cap
-	@cp "$(CAP_TMP)" "$(CAP_OUT)"
-	@echo "CAP created at $(CAP_OUT)"
+	@cap_file="$$(find "$(BUILD_DIR)" -type f -path "*/javacard/*.cap" -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"; \
+	test -n "$$cap_file" || { echo "ERROR: converter produced no CAP under $(BUILD_DIR)"; exit 1; }; \
+	cp "$$cap_file" "$(CAP_OUT)"; \
+	echo "CAP created at $(CAP_OUT) (from $$cap_file)"
 
 clean:
 	rm -rf "$(BUILD_DIR)"

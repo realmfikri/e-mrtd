@@ -9,7 +9,7 @@ GP_BIN="${GP_BIN:-gp}"
 OPENSC_TOOL_BIN="${OPENSC_TOOL_BIN:-opensc-tool}"
 OPENSC_READER="${OPENSC_READER:-}"
 
-APPLET_AID_HEX="${APPLET_AID_HEX:-A000000247100001}"
+APPLET_AID_HEX="${APPLET_AID_HEX}"
 
 print_result() {
   local label="$1"
@@ -80,75 +80,110 @@ run_apdus_gp() {
   local output pairs label expect resp sw data
   local -a pair_lines
 
-  # Human-readable APDUs (without optional trailing Le for case-3 commands).
-  APDUS=(
-    "00A4040008${APPLET_AID_HEX}"
-    "00A4020C02011E"
-    "00B0000020"
-    "00A4020C020101"
-    "00B0000020"
-    "00B0002020"
-    "00A4020C02DEAD"
-    "00A4000C023F00"
-    "00E000000783021100820138"
-    "00A4020C021100"
-    "00E000000A83021101820101800140"
-    "00A4020C021101"
-    "00D6000010465344454D4F5F57524954455F544553"
-    "00B0000010"
-    "00B0001010"
-  )
-  LABELS=(
-    "SELECT applet by AID"
-    "SELECT EF.COM (011E)"
-    "READ EF.COM first 32 bytes"
-    "SELECT EF.DG1 (0101)"
-    "READ EF.DG1 bytes [0..31]"
-    "READ EF.DG1 bytes [32..63]"
-    "SELECT unknown FID (expect not found)"
-    "SELECT MF (3F00)"
-    "CREATE DF (1100)"
-    "SELECT DF (1100)"
-    "CREATE EF (1101, size 0x40)"
-    "SELECT EF (1101)"
-    "UPDATE BINARY EF(1101) bytes [0..15]"
-    "READ EF(1101) bytes [0..15]"
-    "READ EF(1101) bytes [16..31] (zero-filled)"
-  )
-  EXPECT_SW=(
-    "9000"
-    "9000"
-    "9000"
-    "9000"
-    "9000"
-    "9000"
-    "6A82"
-    "9000"
-    "9000"
-    "9000"
-    "9000"
-    "9000"
-    "9000"
-    "9000"
-    "9000"
-  )
-  EXPECT_DATA=(
-    ""
-    ""
-    ""
-    ""
-    ""
-    ""
-    ""
-    ""
-    ""
-    ""
-    ""
-    ""
-    ""
-    "465344454D4F5F57524954455F544553"
-    "00000000000000000000000000000000"
-  )
+  if [[ "${APPLET_PROFILE}" == "passport" ]]; then
+    APDUS=(
+      "00A4040007${APPLET_AID_HEX}"
+      "00E000000663040020EFFF"
+      "00A4020C02EFFF"
+      "00D6000009534D4F4B455F444754"
+      "00DA006220621E5F1F09433458394C3251373C5F18063033303231315F1906323830323131"
+      "0084000008"
+    )
+    LABELS=(
+      "SELECT applet by AID"
+      "CREATE EF (EFFF, size 0x20)"
+      "SELECT EF (EFFF)"
+      "UPDATE BINARY EF(EFFF) bytes [0..8]"
+      "PUT DATA MRZ seed (p1=00 p2=62)"
+      "GET CHALLENGE (8 bytes)"
+    )
+    EXPECT_SW=(
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+    )
+    EXPECT_DATA=(
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+    )
+  else
+    # Human-readable APDUs (without optional trailing Le for case-3 commands).
+    APDUS=(
+      "00A4040008${APPLET_AID_HEX}"
+      "00A4020C02011E"
+      "00B0000020"
+      "00A4020C020101"
+      "00B0000020"
+      "00B0002020"
+      "00A4020C02DEAD"
+      "00A4000C023F00"
+      "00E000000783021100820138"
+      "00A4020C021100"
+      "00E000000A83021101820101800140"
+      "00A4020C021101"
+      "00D6000010465344454D4F5F57524954455F544553"
+      "00B0000010"
+      "00B0001010"
+    )
+    LABELS=(
+      "SELECT applet by AID"
+      "SELECT EF.COM (011E)"
+      "READ EF.COM first 32 bytes"
+      "SELECT EF.DG1 (0101)"
+      "READ EF.DG1 bytes [0..31]"
+      "READ EF.DG1 bytes [32..63]"
+      "SELECT unknown FID (expect not found)"
+      "SELECT MF (3F00)"
+      "CREATE DF (1100)"
+      "SELECT DF (1100)"
+      "CREATE EF (1101, size 0x40)"
+      "SELECT EF (1101)"
+      "UPDATE BINARY EF(1101) bytes [0..15]"
+      "READ EF(1101) bytes [0..15]"
+      "READ EF(1101) bytes [16..31] (zero-filled)"
+    )
+    EXPECT_SW=(
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "6A82"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+      "9000"
+    )
+    EXPECT_DATA=(
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+      ""
+      "465344454D4F5F57524954455F544553"
+      "00000000000000000000000000000000"
+    )
+  fi
 
   # Some gp builds reject case-3 APDUs unless an explicit trailing Le byte is present.
   # Keep printed APDUs canonical while normalizing gp input for compatibility.
@@ -222,19 +257,28 @@ if command -v "$GP_BIN" >/dev/null 2>&1; then
 fi
 
 # No gp: try opensc-tool sequentially (state may not persist depending on reader/runtime).
-run_apdu_opensc "SELECT applet by AID" "00A4040008${APPLET_AID_HEX}" "9000"
-run_apdu_opensc "SELECT EF.COM (011E)" "00A4020C02011E" "9000"
-run_apdu_opensc "READ EF.COM first 32 bytes" "00B0000020" "9000"
-run_apdu_opensc "SELECT EF.DG1 (0101)" "00A4020C020101" "9000"
-run_apdu_opensc "READ EF.DG1 bytes [0..31]" "00B0000020" "9000"
-run_apdu_opensc "READ EF.DG1 bytes [32..63]" "00B0002020" "9000"
-run_apdu_opensc "SELECT unknown FID (expect not found)" "00A4020C02DEAD" "6A82"
-run_apdu_opensc "SELECT MF (3F00)" "00A4000C023F00" "9000"
-run_apdu_opensc "CREATE DF (1100)" "00E000000783021100820138" "9000"
-run_apdu_opensc "SELECT DF (1100)" "00A4020C021100" "9000"
-run_apdu_opensc "CREATE EF (1101, size 0x40)" "00E000000A83021101820101800140" "9000"
-run_apdu_opensc "SELECT EF (1101)" "00A4020C021101" "9000"
-run_apdu_opensc "UPDATE BINARY EF(1101) bytes [0..15]" "00D6000010465344454D4F5F57524954455F544553" "9000"
-run_apdu_opensc "READ EF(1101) bytes [0..15]" "00B0000010" "9000" "465344454D4F5F57524954455F544553"
-run_apdu_opensc "READ EF(1101) bytes [16..31] (zero-filled)" "00B0001010" "9000" "00000000000000000000000000000000"
+if [[ "${APPLET_PROFILE}" == "passport" ]]; then
+  run_apdu_opensc "SELECT applet by AID" "00A4040007${APPLET_AID_HEX}" "9000"
+  run_apdu_opensc "CREATE EF (EFFF, size 0x20)" "00E000000663040020EFFF" "9000"
+  run_apdu_opensc "SELECT EF (EFFF)" "00A4020C02EFFF" "9000"
+  run_apdu_opensc "UPDATE BINARY EF(EFFF) bytes [0..8]" "00D6000009534D4F4B455F444754" "9000"
+  run_apdu_opensc "PUT DATA MRZ seed (p1=00 p2=62)" "00DA006220621E5F1F09433458394C3251373C5F18063033303231315F1906323830323131" "9000"
+  run_apdu_opensc "GET CHALLENGE (8 bytes)" "0084000008" "9000"
+else
+  run_apdu_opensc "SELECT applet by AID" "00A4040008${APPLET_AID_HEX}" "9000"
+  run_apdu_opensc "SELECT EF.COM (011E)" "00A4020C02011E" "9000"
+  run_apdu_opensc "READ EF.COM first 32 bytes" "00B0000020" "9000"
+  run_apdu_opensc "SELECT EF.DG1 (0101)" "00A4020C020101" "9000"
+  run_apdu_opensc "READ EF.DG1 bytes [0..31]" "00B0000020" "9000"
+  run_apdu_opensc "READ EF.DG1 bytes [32..63]" "00B0002020" "9000"
+  run_apdu_opensc "SELECT unknown FID (expect not found)" "00A4020C02DEAD" "6A82"
+  run_apdu_opensc "SELECT MF (3F00)" "00A4000C023F00" "9000"
+  run_apdu_opensc "CREATE DF (1100)" "00E000000783021100820138" "9000"
+  run_apdu_opensc "SELECT DF (1100)" "00A4020C021100" "9000"
+  run_apdu_opensc "CREATE EF (1101, size 0x40)" "00E000000A83021101820101800140" "9000"
+  run_apdu_opensc "SELECT EF (1101)" "00A4020C021101" "9000"
+  run_apdu_opensc "UPDATE BINARY EF(1101) bytes [0..15]" "00D6000010465344454D4F5F57524954455F544553" "9000"
+  run_apdu_opensc "READ EF(1101) bytes [0..15]" "00B0000010" "9000" "465344454D4F5F57524954455F544553"
+  run_apdu_opensc "READ EF(1101) bytes [16..31] (zero-filled)" "00B0001010" "9000" "00000000000000000000000000000000"
+fi
 echo "APDU smoke checks completed."

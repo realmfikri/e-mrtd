@@ -10,6 +10,7 @@ mkdir -p "$OUT_DIR"
 source "$SCRIPT_DIR/gp_env.sh"
 
 CAP_PATH="$REPO_ROOT/$GP_CAP_REL"
+echo "[install] profile=$APPLET_PROFILE package_aid=$GP_PACKAGE_AID applet_aid=$GP_APPLET_AID"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 PRE_LOG="$OUT_DIR/gp_pre_install_${STAMP}.log"
 POST_LOG="$OUT_DIR/gp_post_install_${STAMP}.log"

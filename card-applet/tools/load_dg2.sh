@@ -8,11 +8,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/gp_env.sh"
 
 GP_BIN="${GP_BIN:-gp}"
-APPLET_AID_HEX="${APPLET_AID_HEX:-A000000247100001}"
+APPLET_AID_HEX="${APPLET_AID_HEX}"
 DG2_DF_FID="${DG2_DF_FID:-1100}"
 DG2_EF_FID="${DG2_EF_FID:-0102}"
 DG2_CHUNK_SIZE="${DG2_CHUNK_SIZE:-200}"
-DG2_PATH_DEFAULT="$REPO_ROOT/card-applet/sample-data/DG2/fikri jamal.jpeg"
+if [[ "${APPLET_PROFILE}" == "passport" ]]; then
+  DG2_PATH_DEFAULT="$REPO_ROOT/card-applet/sample-data/passport/EF.DG2.bin"
+else
+  DG2_PATH_DEFAULT="$REPO_ROOT/card-applet/sample-data/DG2/fikri jamal.jpeg"
+fi
 DG2_PATH="${1:-${DG2_PATH:-$DG2_PATH_DEFAULT}}"
 
 if ! command -v "$GP_BIN" >/dev/null 2>&1; then
@@ -76,14 +80,21 @@ sw_allowed() {
   return 1
 }
 
-add_apdu "SELECT applet" "00A4040008${APPLET_AID_HEX}" "9000"
-add_apdu "SELECT MF" "00A4000C023F00" "9000"
-add_apdu "CREATE DF ${DG2_DF_FID}" "00E00000078302${DG2_DF_FID}820138" "9000,6A80"
-add_apdu "SELECT DF ${DG2_DF_FID}" "00A4020C02${DG2_DF_FID}" "9000"
-
+aid_len_hex="$(printf '%02X' $(( ${#APPLET_AID_HEX} / 2 )))"
 size_hex="$(printf '%04X' "$filesize")"
-add_apdu "CREATE EF ${DG2_EF_FID} size=${filesize}" "00E000000B8302${DG2_EF_FID}8201018002${size_hex}" "9000,6A80"
-add_apdu "SELECT EF ${DG2_EF_FID}" "00A4020C02${DG2_EF_FID}" "9000"
+
+if [[ "${APPLET_PROFILE}" == "passport" ]]; then
+  add_apdu "SELECT applet" "00A40400${aid_len_hex}${APPLET_AID_HEX}" "9000"
+  add_apdu "CREATE EF ${DG2_EF_FID} size=${filesize}" "00E00000066304${size_hex}${DG2_EF_FID}" "9000"
+  add_apdu "SELECT EF ${DG2_EF_FID}" "00A4020C02${DG2_EF_FID}" "9000"
+else
+  add_apdu "SELECT applet" "00A40400${aid_len_hex}${APPLET_AID_HEX}" "9000"
+  add_apdu "SELECT MF" "00A4000C023F00" "9000"
+  add_apdu "CREATE DF ${DG2_DF_FID}" "00E00000078302${DG2_DF_FID}820138" "9000,6A80"
+  add_apdu "SELECT DF ${DG2_DF_FID}" "00A4020C02${DG2_DF_FID}" "9000"
+  add_apdu "CREATE EF ${DG2_EF_FID} size=${filesize}" "00E000000B8302${DG2_EF_FID}8201018002${size_hex}" "9000,6A80"
+  add_apdu "SELECT EF ${DG2_EF_FID}" "00A4020C02${DG2_EF_FID}" "9000"
+fi
 
 offset=0
 while (( offset < filesize )); do

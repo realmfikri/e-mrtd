@@ -1,265 +1,99 @@
 # card-applet
 
-Educational Java Card applet and tooling for a **demo eMRTD-like** command flow.
+Java Card applet build/install tooling for eMRTD simulation.
 
-> **Security scope warning:** this applet is for demonstration/testing only, not for real document issuance, border-control use, or impersonation scenarios.
+> Security scope: this repository is for development/testing only, not production document issuance.
+
+## Applet profiles
+
+`card-applet` supports two profiles:
+
+- `passport` (default): BAC-capable applet (`sos.passportapplet.PassportApplet`) aligned with the existing JMRTD/PassportService reader flow.
+- `educational`: minimal plaintext demo applet (`cardapplet.EducationalEmrtdApplet`).
+
+Set with `APPLET_PROFILE` (defaults to `passport`).
 
 ## Prerequisites
 
-- **Java/JDK**: a JDK with `JAVA_HOME` set (the build invokes `javac` and `java`).
-  - The CAP conversion toolchain typically expects **Java 8 classfiles**, so the Makefile compiles with `--release 8` by default.
-- **Java Card kit**: set `JCKIT` to your Java Card kit path (legacy `JCPATH` is accepted and mapped to `JCKIT`).
-- **GlobalPlatformPro (`gp`)**: required to install/delete applets on card/simulator.
-- **OpenSC (`opensc-tool`)**: useful for reader/PCSC troubleshooting.
+- `JAVA_HOME` set to a JDK path.
+- `JCKIT` set to a Java Card kit path.
+- `gp` (GlobalPlatformPro) available in `PATH`.
+- PC/SC reader configured (for physical cards).
 
-### Supported Java Card kit layouts
+## Quick start (real reader compatible)
 
-This repo supports two common `JCKIT` layouts:
-
-1. Classic SDK layout (older):
-   - `lib/api.jar`
-   - `lib/converter.jar`
-   - `lib/offcardverifier.jar` (optional here, but common in classic SDKs)
-   - `api_export_files/`
-
-2. Tools-only layout (newer, like `java_card_devkit_tools`):
-   - `bin/converter.sh`
-   - `lib/tools.jar`
-   - `lib/api_classic-<version>.jar`
-   - export files are embedded inside `tools.jar` (extracted during build into `card-applet/build/jckit_exports/`)
-
-If you have a tools-only kit, set `JCKIT` to the directory that contains `bin/` and `lib/` (not a nested folder name).
-
-## Commands
-
-Run from repository root unless noted.
-
-- **Build**
-
-  ```bash
-  export JAVA_HOME=/path/to/jdk
-  export JCKIT=/path/to/jckit
-  ./card-applet/build.sh
-  # or:
-  make -C card-applet
-  ```
-
-  Useful overrides:
-
-  ```bash
-  # If your card is not Java Card 3.2.0, set the target platform version used by converter/export files.
-  make -C card-applet JC_TARGET=3.0.5
-
-  # If you want to change the Java classfile level (converter usually wants 8 / classfile 52.0).
-  make -C card-applet JAVAC_RELEASE=8
-  ```
-
-- **Install**
-
-  ```bash
-  ./card-applet/tools/install.sh
-  ```
-
-- **Uninstall**
-
-  ```bash
-  ./card-applet/tools/uninstall.sh
-  ```
-
-- **Smoke test**
-
-  ```bash
-  ./card-applet/tools/apdu_smoke.sh
-  ```
-
-- **Provision DG2 image (chunked UPDATE BINARY)**
-
-  ```bash
-  # Uses sample-data/DG2/fikri\ jamal.jpeg by default
-  ./card-applet/tools/load_dg2.sh
-
-  # Or provide your own file path
-  ./card-applet/tools/load_dg2.sh /path/to/photo.jpg
-  ```
-
-## Installing To A Physical Card
-
-1. Build a CAP:
-
-   ```bash
-   export JAVA_HOME=/path/to/jdk
-   export JCKIT=/path/to/jckit
-   ./card-applet/build.sh
-   ```
-
-   Output is `card-applet/build/applet.cap`.
-
-2. Install using GlobalPlatformPro:
-
-   ```bash
-   # Optional: override reader name (see `gp -r` to list readers)
-   export GP_READER="ACR1552 1S CL Reader PICC"
-   # Recommended on ACR1552/contactless stacks:
-   export GP_NFC_BLOCK_SIZE=64
-   export GP_EXTRA_OPTS="--mode ENC --pcsc-exclusive"
-
-   ./card-applet/tools/install.sh
-   ```
-
-3. Run a quick APDU sanity check:
-
-   ```bash
-   ./card-applet/tools/apdu_smoke.sh
-   ```
-
-4. Optional: load DG2 placeholder image into EF `0102`:
-
-   ```bash
-   ./card-applet/tools/load_dg2.sh
-   ```
-
-5. Uninstall (optional):
-
-   ```bash
-   ./card-applet/tools/uninstall.sh
-   ```
-
-## Implemented behavior
-
-- `SELECT` by applet AID (`00 A4 04 0C ...`).
-- `SELECT FILE` by FID (`00 A4 02 0C 02 <FID>`).
-- `SELECT MF` (`3F00`) and a minimal in-memory filesystem demo.
-- `CREATE FILE` (`00 E0 00 00 ...`) for one DF and one transparent EF.
-- `UPDATE BINARY` (`00 D6 ...`) for writes to the created EF.
-- `READ BINARY` offset-based reads (`00 B0 <offset_hi> <offset_lo> <Le>`).
-- `EF.COM` and `DG1` are available for smoke/demo flows.
-- Dynamic transparent EF size supports DG2-style demo payloads up to `24576` bytes.
-
-### Filesystem demo scope
-
-This applet now supports a bounded educational filesystem flow:
-
-1. Select MF (`3F00`)
-2. Create one DF under MF
-3. Create one transparent EF under that DF
-4. Write bytes with `UPDATE BINARY`
-5. Read bytes back with `READ BINARY`
-
-Boundaries (intentional):
-
-- only one dynamic DF and one dynamic EF slot are supported
-- no delete/resize command
-- not a full ISO 7816 filesystem implementation
-
-## Not implemented
-
-- BAC/PACE.
-- Secure messaging.
-- Real `EF.SOD` signatures or production passport semantics.
-
-## Troubleshooting appendix
-
-Manual APDU examples (hex, spaces optional):
-
-- **Select applet by AID**
-
-  ```text
-  00 A4 04 0C 08 A0 00 00 02 47 10 00 01
-  ```
-
-  Expected status word: `9000`.
-
-- **Select EF.COM by FID (`011E`)**
-
-  ```text
-  00 A4 02 0C 02 01 1E
-  ```
-
-  Expected status word: `9000`.
-
-- **Read first bytes from selected EF (offset `0000`, Le `10`)**
-
-  ```text
-  00 B0 00 00 10
-  ```
-
-  Expected status word: `9000` (with up to `0x10` response bytes).
-
-- **Select DG1 by FID (`0101`)**
-
-  ```text
-  00 A4 02 0C 02 01 01
-  ```
-
-  Expected status word: `9000`.
-
-- **Read DG1 slice (offset `0010`, Le `20`)**
-
-  ```text
-  00 B0 00 10 20
-  ```
-
-  Expected status word: `9000` while in range; out-of-range reads may return an error status depending on card/runtime.
-
-- **Select MF (`3F00`)**
-
-  ```text
-  00 A4 00 0C 02 3F 00
-  ```
-
-  Expected status word: `9000`.
-
-- **Create DF (`FID=1100`)**
-
-  ```text
-  00 E0 00 00 07 83 02 11 00 82 01 38
-  ```
-
-  Expected status word: `9000` (requires MF selected).
-
-- **Create EF (`FID=1101`, size=0x40)**
-
-  ```text
-  00 E0 00 00 0A 83 02 11 01 82 01 01 80 01 40
-  ```
-
-  Expected status word: `9000` (requires DF selected).
-
-- **Write EF bytes (offset `0000`)**
-
-  ```text
-  00 D6 00 00 10 46 53 44 45 4D 4F 5F 57 52 49 54 45 5F 54 45 53
-  ```
-
-  Expected status word: `9000`.
-
-- **Read EF bytes (offset `0000`, Le `10`)**
-
-  ```text
-  00 B0 00 00 10
-  ```
-
-  Expected status word: `9000` and previously written payload.
-
-Common SW notes for filesystem operations:
-
-- `6985`: wrong selection context (for example creating DF without selecting MF first, or EF without selecting DF first).
-- `6A80`: malformed CREATE FILE payload.
-- `6A81`: unsupported file descriptor or unsupported write target.
-- `6A84`: requested dynamic EF size exceeds implementation limit.
-
-If APDUs fail, verify reader visibility first:
+Run from repository root:
 
 ```bash
-opensc-tool -l
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+export JCKIT="$HOME/tools"
+export APPLET_PROFILE=passport
+
+export GP_READER="ACR1552 1S CL Reader PICC"
+export GP_NFC_BLOCK_SIZE=64
+export GP_EXTRA_OPTS="--mode ENC --pcsc-exclusive"
+
+make -C card-applet clean all JC_TARGET=3.0.5
+./card-applet/tools/uninstall.sh || true
+./card-applet/tools/install.sh
+./card-applet/tools/personalize_passport.sh
+./card-applet/tools/apdu_smoke.sh
 ```
 
-GlobalPlatform notes:
+Default personalization values in `personalize_passport.sh`:
 
-- `tools/uninstall.sh` is idempotent: if applet/package AIDs are already absent (`6A88` or "not present on card"), it logs and continues.
-- On some cards, deleting the applet AID can return `6A88` while deleting the package AID succeeds. The script now attempts both and continues when AIDs are already missing.
-- `tools/apdu_smoke.sh` normalizes case-3 APDUs for `gp` compatibility by sending an explicit trailing `Le=00` when needed.
+- Document number: `C4X9L2Q7<`
+- DOB: `030211` (11 Feb 2003)
+- DOE: `280211` (11 Feb 2028)
+- DG1 identity: `MUHAMAD<<FIKRI`, nationality `IDN`
 
-## Spec notes
+Override MRZ seed values if needed:
 
-See `card-applet/spec-notes/part10-part11-part12-scope.md` for a mapping of ICAO Part 10 requirements to implemented behavior and explicit Part 11/12 scope boundaries.
+```bash
+./card-applet/tools/personalize_passport.sh \
+  --doc-number C4X9L2Q7 \
+  --dob 030211 \
+  --doe 280211
+```
+
+Optional DG2 write:
+
+```bash
+./card-applet/tools/personalize_passport.sh --with-dg2
+# or directly:
+./card-applet/tools/load_dg2.sh card-applet/sample-data/passport/EF.DG2.bin
+```
+
+## Test with existing reader UI
+
+Use the existing app reader flow (no reader code changes required):
+
+```bash
+mvn -q -DskipTests javafx:run
+```
+
+In the UI:
+
+1. Open **Read passport**.
+2. Enter MRZ fields:
+   - Document number: `C4X9L2Q7` (UI pads to MRZ length)
+   - Date of birth: `030211`
+   - Date of expiry: `280211`
+3. Click **Read passport**.
+
+If card transport fails before APDU (`SCARD_W_UNPOWERED_CARD`), re-seat the card/tag and retry with stable reader contact.
+
+## Educational profile (legacy smoke flow)
+
+```bash
+export APPLET_PROFILE=educational
+make -C card-applet clean all JC_TARGET=3.0.5
+./card-applet/tools/install.sh
+./card-applet/tools/apdu_smoke.sh
+```
+
+## Notes
+
+- `tools/gp_env.sh` switches default AIDs based on `APPLET_PROFILE`.
+- `tools/apdu_smoke.sh` and `tools/load_dg2.sh` are profile-aware.
+- Build output CAP path is always `card-applet/build/applet.cap`.

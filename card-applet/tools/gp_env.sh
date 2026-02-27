@@ -5,10 +5,30 @@ set -euo pipefail
 # Allow reader override from caller while providing a stable default.
 export GP_READER="${GP_READER:-ACR1552 1S CL Reader PICC}"
 
+# Applet profile defaults.
+export APPLET_PROFILE="${APPLET_PROFILE:-passport}"
+case "$APPLET_PROFILE" in
+  passport)
+    DEFAULT_GP_PACKAGE_AID="A00000024710"
+    DEFAULT_GP_APPLET_AID="A0000002471001"
+    DEFAULT_APPLET_AID_HEX="A0000002471001"
+    ;;
+  educational)
+    DEFAULT_GP_PACKAGE_AID="A0000002471000"
+    DEFAULT_GP_APPLET_AID="A000000247100001"
+    DEFAULT_APPLET_AID_HEX="A000000247100001"
+    ;;
+  *)
+    echo "ERROR: unsupported APPLET_PROFILE='$APPLET_PROFILE' (use passport or educational)" >&2
+    exit 1
+    ;;
+esac
+
 # Project AIDs / artifacts.
-export GP_PACKAGE_AID="${GP_PACKAGE_AID:-A0000002471000}"
-export GP_APPLET_AID="${GP_APPLET_AID:-A000000247100001}"
+export GP_PACKAGE_AID="${GP_PACKAGE_AID:-$DEFAULT_GP_PACKAGE_AID}"
+export GP_APPLET_AID="${GP_APPLET_AID:-$DEFAULT_GP_APPLET_AID}"
 export GP_CAP_REL="${GP_CAP_REL:-card-applet/build/applet.cap}"
+export APPLET_AID_HEX="${APPLET_AID_HEX:-$DEFAULT_APPLET_AID_HEX}"
 
 # NFC-friendly defaults; callers can tune with GP_NFC_BLOCK_SIZE and GP_RETRIES.
 export GP_NFC_BLOCK_SIZE="${GP_NFC_BLOCK_SIZE:-128}"

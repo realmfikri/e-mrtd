@@ -8,6 +8,7 @@ mkdir -p "$OUT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/gp_env.sh"
 
+echo "[uninstall] profile=$APPLET_PROFILE package_aid=$GP_PACKAGE_AID applet_aid=$GP_APPLET_AID"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 REMOVE_LOG="$OUT_DIR/gp_uninstall_${STAMP}.log"
 POST_LOG="$OUT_DIR/gp_post_uninstall_${STAMP}.log"
