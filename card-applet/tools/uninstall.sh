@@ -12,6 +12,7 @@ echo "[uninstall] profile=$APPLET_PROFILE package_aid=$GP_PACKAGE_AID applet_aid
 STAMP="$(date +%Y%m%d_%H%M%S)"
 REMOVE_LOG="$OUT_DIR/gp_uninstall_${STAMP}.log"
 POST_LOG="$OUT_DIR/gp_post_uninstall_${STAMP}.log"
+UNINSTALL_ALL_PROFILES="${UNINSTALL_ALL_PROFILES:-1}"
 
 delete_aid() {
   local label="$1"
@@ -34,9 +35,48 @@ delete_aid() {
   return 1
 }
 
+collect_unique_aids() {
+  local -n out_ref=$1
+  shift
+  local aid
+  declare -A seen=()
+  out_ref=()
+  for aid in "$@"; do
+    if [[ -n "$aid" && -z "${seen[$aid]:-}" ]]; then
+      out_ref+=("$aid")
+      seen[$aid]=1
+    fi
+  done
+}
+
 {
-  delete_aid "applet" "$GP_APPLET_AID"
-  delete_aid "package" "$GP_PACKAGE_AID"
+  if [[ "$UNINSTALL_ALL_PROFILES" == "1" ]]; then
+    collect_unique_aids APPLET_AIDS \
+      "$GP_APPLET_AID" \
+      "A000000247100001" \
+      "A0000002471001"
+    collect_unique_aids PACKAGE_AIDS \
+      "$GP_PACKAGE_AID" \
+      "A0000002471000" \
+      "A00000024710"
+  else
+    APPLET_AIDS=("$GP_APPLET_AID")
+    PACKAGE_AIDS=("$GP_PACKAGE_AID")
+  fi
+
+  uninstall_failed=0
+
+  for aid in "${APPLET_AIDS[@]}"; do
+    delete_aid "applet" "$aid" || uninstall_failed=1
+  done
+  for aid in "${PACKAGE_AIDS[@]}"; do
+    delete_aid "package" "$aid" || uninstall_failed=1
+  done
+
+  if (( uninstall_failed != 0 )); then
+    echo "[uninstall] ERROR: one or more delete operations failed."
+    exit 1
+  fi
 } >"$REMOVE_LOG" 2>&1
 
 echo "[uninstall] Capturing post-uninstall listing -> $POST_LOG"

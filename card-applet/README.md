@@ -40,6 +40,8 @@ make -C card-applet clean all JC_TARGET=3.0.5
 ./card-applet/tools/apdu_smoke.sh
 ```
 
+When switching between `educational` and `passport` profiles, keep `UNINSTALL_ALL_PROFILES=1` (default) so stale packages from the other profile are also removed.
+
 Default personalization values in `personalize_passport.sh`:
 
 - Document number: `C4X9L2Q7<`

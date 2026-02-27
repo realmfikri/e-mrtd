@@ -25,8 +25,70 @@ print_result() {
 }
 
 run_apdu_gp() {
-  echo "ERROR: internal error (run_apdu_gp should not be called)"
-  exit 2
+  local label="$1"
+  local apdu="$2"
+  local expect_sw="${3:-}"
+  local expect_data="${4:-}"
+  local tx output resp sw data
+
+  tx="$apdu"
+  if (( ${#tx} > 10 )); then
+    tx="${tx}00"
+  fi
+
+  if ! output="$($GP_BIN --debug --verbose "${GP_COMMON_OPTS[@]}" -a "$tx" 2>&1)"; then
+    echo "ERROR: gp APDU failed: $label"
+    printf '%s\n' "$output"
+    return 1
+  fi
+
+  resp="$(printf '%s\n' "$output" | awk -v target="$tx" '
+    $1=="A>>" {
+      cmd=$0
+      sub(/^.*[)] /, "", cmd)
+      gsub(/ /, "", cmd)
+      cur_cmd=cmd
+      next
+    }
+    $1=="A<<" {
+      r=$0
+      sub(/^.*[)] /, "", r)
+      gsub(/ /, "", r)
+      if (cur_cmd == target) {
+        found=r
+      }
+      next
+    }
+    END {
+      if (length(found) > 0) {
+        print found
+      }
+    }
+  ')"
+
+  if [[ -z "$resp" ]]; then
+    echo "ERROR: unable to parse response for APDU: $label ($tx)"
+    printf '%s\n' "$output"
+    return 1
+  fi
+  if (( ${#resp} < 4 )); then
+    echo "ERROR: response too short for APDU: $label ($tx)"
+    echo "RESP : $resp"
+    return 1
+  fi
+
+  sw="${resp: -4}"
+  data="${resp:0:${#resp}-4}"
+  print_result "$label" "$apdu" "$data" "$sw"
+
+  if [[ -n "$expect_sw" && "$sw" != "$expect_sw" ]]; then
+    echo "ERROR: expected SW=$expect_sw, got SW=$sw ($label)"
+    return 1
+  fi
+  if [[ -n "$expect_data" && "$data" != "$expect_data" ]]; then
+    echo "ERROR: expected DATA=$expect_data, got DATA=$data ($label)"
+    return 1
+  fi
 }
 
 run_apdu_opensc() {
@@ -77,9 +139,6 @@ run_apdu_opensc() {
 }
 
 run_apdus_gp() {
-  local output pairs label expect resp sw data
-  local -a pair_lines
-
   if [[ "${APPLET_PROFILE}" == "passport" ]]; then
     APDUS=(
       "00A4040007${APPLET_AID_HEX}"
@@ -185,67 +244,8 @@ run_apdus_gp() {
     )
   fi
 
-  # Some gp builds reject case-3 APDUs unless an explicit trailing Le byte is present.
-  # Keep printed APDUs canonical while normalizing gp input for compatibility.
-  GP_APDUS=()
-  for a in "${APDUS[@]}"; do
-    if (( ${#a} > 10 )); then
-      GP_APDUS+=("${a}00")
-    else
-      GP_APDUS+=("$a")
-    fi
-  done
-
-  gp_args=(--debug --verbose "${GP_COMMON_OPTS[@]}")
-  for a in "${GP_APDUS[@]}"; do
-    gp_args+=(-a "$a")
-  done
-
-  if ! output="$($GP_BIN "${gp_args[@]}" 2>&1)"; then
-    echo "ERROR: gp APDU batch failed."
-    printf '%s\n' "$output"
-    return 1
-  fi
-
-  # Build a table of: <APDU_HEX_NO_SPACES> <RESP_HEX_NO_SPACES>
-  pairs="$(printf '%s\n' "$output" | awk '
-    $1=="A>>" { cmd=$0; sub(/^.*[)] /, "", cmd); gsub(/ /, "", cmd); last_cmd=cmd; next }
-    $1=="A<<" && last_cmd!="" { resp=$0; sub(/^.*[)] /, "", resp); gsub(/ /, "", resp); print last_cmd, resp; last_cmd=""; next }
-  ')"
-
-  mapfile -t pair_lines < <(printf '%s\n' "$pairs")
-  if (( ${#pair_lines[@]} < ${#APDUS[@]} )); then
-    echo "ERROR: expected at least ${#APDUS[@]} APDU responses, got ${#pair_lines[@]}"
-    printf '%s\n' "$output"
-    return 1
-  fi
-
   for i in "${!APDUS[@]}"; do
-    label="${LABELS[$i]}"
-    expect="${EXPECT_SW[$i]}"
-    expect_data="${EXPECT_DATA[$i]}"
-
-    # Use response order: gp prints A>>/A<< pairs in the same order as the -a arguments.
-    resp="$(printf '%s\n' "${pair_lines[$i]}" | awk '{print $2}')"
-
-    if (( ${#resp} < 4 )); then
-      echo "ERROR: response too short for: $label"
-      echo "RESP : $resp"
-      return 1
-    fi
-
-    sw="${resp: -4}"
-    data="${resp:0:${#resp}-4}"
-    print_result "$label" "${APDUS[$i]}" "$data" "$sw"
-
-    if [[ -n "$expect" && "$sw" != "$expect" ]]; then
-      echo "ERROR: expected SW=$expect, got SW=$sw ($label)"
-      return 1
-    fi
-    if [[ -n "$expect_data" && "$data" != "$expect_data" ]]; then
-      echo "ERROR: expected DATA=$expect_data, got DATA=$data ($label)"
-      return 1
-    fi
+    run_apdu_gp "${LABELS[$i]}" "${APDUS[$i]}" "${EXPECT_SW[$i]}" "${EXPECT_DATA[$i]}"
   done
 
   echo "APDU smoke checks completed."

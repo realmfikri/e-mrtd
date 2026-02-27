@@ -51,6 +51,8 @@ done
 if (( ok == 0 )); then
   echo "[install] ERROR: install failed after $GP_RETRIES attempts."
   echo "[install] Guidance: keep card stable on reader and try a smaller GP_NFC_BLOCK_SIZE (for example 96 or 64)."
+  echo "[install] Guidance: clear previously installed profile packages with:"
+  echo "          UNINSTALL_ALL_PROFILES=1 ./card-applet/tools/uninstall.sh"
   echo "[install] Install log: $INSTALL_LOG"
   exit 1
 fi

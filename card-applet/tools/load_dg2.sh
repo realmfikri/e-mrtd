@@ -115,36 +115,48 @@ done
 # Verify JPEG SOI marker.
 add_apdu "READ BINARY verify head (16 bytes)" "00B0000010" "9000"
 
-# Build gp command.
-gp_args=(--debug --verbose "${GP_COMMON_OPTS[@]}")
-for a in "${APDUS[@]}"; do
-  gp_args+=(-a "$(gp_apdu "$a")")
-done
+run_gp_apdu() {
+  local label="$1"
+  local apdu="$2"
+  local expected_csv="$3"
+  local tx output resp sw data
 
-if ! output="$($GP_BIN "${gp_args[@]}" 2>&1)"; then
-  echo "ERROR: gp APDU batch failed"
-  printf '%s\n' "$output"
-  exit 1
-fi
+  tx="$(gp_apdu "$apdu")"
+  if ! output="$($GP_BIN --debug --verbose "${GP_COMMON_OPTS[@]}" -a "$tx" 2>&1)"; then
+    echo "ERROR: gp APDU failed for: $label"
+    printf '%s\n' "$output"
+    exit 1
+  fi
 
-pairs="$(printf '%s\n' "$output" | awk '
-  $1=="A>>" { cmd=$0; sub(/^.*[)] /, "", cmd); gsub(/ /, "", cmd); last_cmd=cmd; next }
-  $1=="A<<" && last_cmd!="" { resp=$0; sub(/^.*[)] /, "", resp); gsub(/ /, "", resp); print last_cmd, resp; last_cmd=""; next }
-')"
+  resp="$(printf '%s\n' "$output" | awk -v target="$tx" '
+    $1=="A>>" {
+      cmd=$0
+      sub(/^.*[)] /, "", cmd)
+      gsub(/ /, "", cmd)
+      cur_cmd=cmd
+      next
+    }
+    $1=="A<<" {
+      r=$0
+      sub(/^.*[)] /, "", r)
+      gsub(/ /, "", r)
+      if (cur_cmd == target) {
+        found=r
+      }
+      next
+    }
+    END {
+      if (length(found) > 0) {
+        print found
+      }
+    }
+  ')"
 
-mapfile -t pair_lines < <(printf '%s\n' "$pairs")
-if (( ${#pair_lines[@]} < ${#APDUS[@]} )); then
-  echo "ERROR: expected at least ${#APDUS[@]} APDU responses, got ${#pair_lines[@]}"
-  printf '%s\n' "$output"
-  exit 1
-fi
-
-for i in "${!APDUS[@]}"; do
-  label="${LABELS[$i]}"
-  apdu="${APDUS[$i]}"
-  expected="${EXPECT_SW[$i]}"
-  resp="$(printf '%s\n' "${pair_lines[$i]}" | awk '{print $2}')"
-
+  if [[ -z "$resp" ]]; then
+    echo "ERROR: unable to parse APDU response for: $label ($tx)"
+    printf '%s\n' "$output"
+    exit 1
+  fi
   if (( ${#resp} < 4 )); then
     echo "ERROR: response too short for: $label"
     echo "RESP : $resp"
@@ -162,12 +174,15 @@ for i in "${!APDUS[@]}"; do
   fi
   echo "[dg2] SW  : $sw"
 
-  if ! sw_allowed "$sw" "$expected"; then
-    echo "ERROR: unexpected SW for $label. Allowed: $expected"
+  if ! sw_allowed "$sw" "$expected_csv"; then
+    echo "ERROR: unexpected SW for $label. Allowed: $expected_csv"
     echo "[dg2] DATA: ${data:-<empty>}"
     exit 1
   fi
+}
 
+for i in "${!APDUS[@]}"; do
+  run_gp_apdu "${LABELS[$i]}" "${APDUS[$i]}" "${EXPECT_SW[$i]}"
 done
 
 echo "[dg2] DG2 upload complete to FID ${DG2_EF_FID}."

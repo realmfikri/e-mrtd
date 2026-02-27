@@ -143,19 +143,30 @@ hex_file_chunk() {
   dd if="$path" bs=1 skip="$offset" count="$count" status=none | xxd -p -c "$count" | tr -d '\n' | tr '[:lower:]' '[:upper:]'
 }
 
-extract_sw() {
+extract_sw_for_apdu() {
   local output="$1"
+  local target_apdu="$2"
   local resp
-  resp="$(printf '%s\n' "$output" | awk '
+  resp="$(printf '%s\n' "$output" | awk -v target="$target_apdu" '
+    $1=="A>>" {
+      cmd=$0
+      sub(/^.*[)] /, "", cmd)
+      gsub(/ /, "", cmd)
+      cur_cmd=cmd
+      next
+    }
     $1=="A<<" {
-      line=$0
-      sub(/^.*[)] /, "", line)
-      gsub(/ /, "", line)
-      last=line
+      r=$0
+      sub(/^.*[)] /, "", r)
+      gsub(/ /, "", r)
+      if (cur_cmd == target && length(r) >= 4) {
+        sw = substr(r, length(r) - 3)
+      }
+      next
     }
     END {
-      if (length(last) >= 4) {
-        print substr(last, length(last) - 3)
+      if (length(sw) > 0) {
+        print sw
       }
     }
   ')"
@@ -179,9 +190,9 @@ run_gp_apdu() {
     exit 1
   fi
 
-  sw="$(extract_sw "$output")"
+  sw="$(extract_sw_for_apdu "$output" "$tx")"
   if [[ -z "$sw" ]]; then
-    echo "ERROR: unable to parse SW for APDU: $label" >&2
+    echo "ERROR: unable to parse SW for APDU: $label ($tx)" >&2
     echo "$output" >&2
     exit 1
   fi
