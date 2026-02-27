@@ -402,7 +402,7 @@ public final class EmuSimulatorApp extends Application {
 
     RealPassportReaderTask task = new RealPassportReaderTask(
         null,
-        0,
+        -1,
         documentNumber,
         dateOfBirth,
         dateOfExpiry,

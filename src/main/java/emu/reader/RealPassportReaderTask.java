@@ -8,6 +8,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.Security;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,19 +79,54 @@ public class RealPassportReaderTask extends Task<RealPassportSnapshot> {
         }
 
         if (terminalIndex < 0 || terminalIndex >= terminals.size()) {
-            throw new IllegalArgumentException("Terminal index " + terminalIndex + " out of range. Found " + terminals.size() + " terminal(s).");
+            if (terminalIndex >= 0) {
+                throw new IllegalArgumentException("Terminal index " + terminalIndex + " out of range. Found " + terminals.size() + " terminal(s).");
+            }
         }
 
-        CardTerminal terminal = terminals.get(terminalIndex);
-        updateMessage("Waiting for passport...");
-        terminal.waitForCardPresent(0);
+        List<CardTerminal> candidates = rankTerminals(terminals, terminalIndex);
+        CardTerminal initialTerminal = candidates.get(0);
+        updateMessage("Waiting for passport on " + initialTerminal.getName() + "...");
+        initialTerminal.waitForCardPresent(0);
 
-        CardService cardService = new TerminalCardService(terminal);
+        CardService cardService = null;
         PassportService service = null;
 
         try {
-            updateMessage("Opening passport service...");
-            cardService.open();
+            Exception lastOpenError = null;
+            for (int i = 0; i < candidates.size(); i++) {
+                CardTerminal candidate = candidates.get(i);
+                if (i > 0 && !candidate.isCardPresent()) {
+                    continue;
+                }
+                CardService tryService = new TerminalCardService(candidate);
+                try {
+                    updateMessage("Opening passport service on " + candidate.getName() + "...");
+                    tryService.open();
+                    cardService = tryService;
+                    log("Using terminal: " + candidate.getName());
+                    break;
+                } catch (Exception openError) {
+                    lastOpenError = openError;
+                    String reason = rootMessage(openError);
+                    log("Terminal open failed on " + candidate.getName() + ": " + reason);
+                    try {
+                        tryService.close();
+                    } catch (Exception ignored) {
+                        // ignore cleanup issues while probing terminals
+                    }
+                    if (!isUnpoweredCardError(openError)) {
+                        // For non-power errors still probe other terminals once available.
+                    }
+                }
+            }
+
+            if (cardService == null) {
+                if (lastOpenError != null) {
+                    throw lastOpenError;
+                }
+                throw new IllegalStateException("Unable to open card service on any terminal.");
+            }
 
             service = new PassportService(cardService, 256, 224, false, false);
             service.open();
@@ -239,6 +276,75 @@ public class RealPassportReaderTask extends Task<RealPassportSnapshot> {
         }
     }
 
+    private static List<CardTerminal> rankTerminals(List<CardTerminal> terminals, int requestedIndex) {
+        List<CardTerminal> ordered = new ArrayList<>(terminals.size());
+        if (requestedIndex >= 0 && requestedIndex < terminals.size()) {
+            ordered.add(terminals.get(requestedIndex));
+            for (int i = 0; i < terminals.size(); i++) {
+                if (i != requestedIndex) {
+                    ordered.add(terminals.get(i));
+                }
+            }
+            return ordered;
+        }
+
+        List<CardTerminal> remaining = new ArrayList<>(terminals);
+        remaining.sort(Comparator.comparingInt(RealPassportReaderTask::terminalScore).reversed());
+        ordered.addAll(remaining);
+        return ordered;
+    }
+
+    private static int terminalScore(CardTerminal terminal) {
+        String name = terminal.getName();
+        String upper = name == null ? "" : name.toUpperCase();
+        int score = 0;
+        if (upper.contains("PICC")) {
+            score += 1000;
+        }
+        if (upper.contains("CONTACTLESS") || upper.contains("CL")) {
+            score += 800;
+        }
+        if (upper.contains("NFC")) {
+            score += 700;
+        }
+        if (upper.contains("SAM")) {
+            score -= 1000;
+        }
+        if (upper.contains("ICC")) {
+            score -= 150;
+        }
+        try {
+            if (terminal.isCardPresent()) {
+                score += 100;
+            }
+        } catch (Exception ignored) {
+            // Ignore terminal status probe errors during ranking.
+        }
+        return score;
+    }
+
+    private static boolean isUnpoweredCardError(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && message.contains("SCARD_W_UNPOWERED_CARD")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable current = error;
+        Throwable root = error;
+        while (current != null) {
+            root = current;
+            current = current.getCause();
+        }
+        return root == null ? "unknown error" : String.valueOf(root.getMessage());
+    }
+
     @FunctionalInterface
     interface InputStreamSupplier {
         InputStream get() throws Exception;
@@ -248,4 +354,3 @@ public class RealPassportReaderTask extends Task<RealPassportSnapshot> {
         return s == null ? "" : s;
     }
 }
-
