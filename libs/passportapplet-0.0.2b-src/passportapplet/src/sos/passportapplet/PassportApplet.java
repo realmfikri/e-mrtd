@@ -140,6 +140,12 @@ public class PassportApplet extends Applet implements ISO7816 {
 
     static final short SW_INTERNAL_ERROR = (short) 0x6d66;
 
+    // AID used by this profile (A0000002471001).
+    private static final byte[] APPLET_AID = {
+            (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x02,
+            (byte) 0x47, (byte) 0x10, (byte) 0x01
+    };
+
     private byte[] rnd;
 
     private byte[] ssc;
@@ -920,9 +926,6 @@ public class PassportApplet extends Applet implements ISO7816 {
         byte[] buffer = apdu.getBuffer();
         short lc = (short) (buffer[OFFSET_LC] & 0x00FF);
 
-        if (lc != 2)
-            ISOException.throwIt(SW_WRONG_LENGTH);
-
         if (apdu.getCurrentState() == APDU.STATE_INITIAL) {
             apdu.setIncomingAndReceive();
         }
@@ -930,6 +933,18 @@ public class PassportApplet extends Applet implements ISO7816 {
             // need all data in one APDU.
             ISOException.throwIt(SW_INTERNAL_ERROR);
         }
+
+        if (lc == (short) APPLET_AID.length) {
+            if (Util.arrayCompare(buffer, OFFSET_CDATA, APPLET_AID, (short) 0,
+                    (short) APPLET_AID.length) == 0) {
+                setNoFileSelected();
+                return;
+            }
+            ISOException.throwIt(ISO7816.SW_FILE_NOT_FOUND);
+        }
+
+        if (lc != 2)
+            ISOException.throwIt(SW_WRONG_LENGTH);
 
         short fid = Util.getShort(buffer, OFFSET_CDATA);
 
